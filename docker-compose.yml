@@ -1,0 +1,15 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cdx-rocks:latest
+    container_name: cdx-rocks-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./rocksdb_index:/app/data
+    environment:
+      - ENV=production
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

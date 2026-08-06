@@ -1,0 +1,59 @@
+[project]
+name = "cdx-rocks"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "brian-learns", email = "epitome-tampers.1v@icloud.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[standard]>=0.141.1",
+]
+
+[project.scripts]
+cdx-rocks = "cdx_rocks:main"
+
+[build-system]
+requires = ["uv_build>=0.11.33,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9.4",
+    "pytest>=9.1.1",
+    "refurb>=2.3.1",
+    "ruff>=0.16.1",
+    "ty>=0.0.69",
+    "vulture>=2.16",
+]
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # Pycodestyle errors
+    "F",   # Pyflakes (catches undefined names / unused variables)
+    "B",   # Bugbear (catches common design anti-patterns)
+    "S",   # Bandit Automated Security checks
+    "I",   # Isort (enforces clean import sorting structures)
+    "N",   # PEP8 Naming convention enforcement
+    "RUF"  # Ruff-specific absolute modern rules
+]
+ignore = [
+    "S101", # Allows 'assert' statements for pytest modules
+    "E501"  # Let the formatter handle long agent lines, don't trigger lint errors
+]
+
+
+[tool.bandit]
+skips = ["B101", "B404", "B602"]
+
+[tool.interrogate]
+fail-under = 90
+exclude = ["tests"]
+ignore-init-method = true
+ignore-module = true
+
+[tool.ty]
+rules = { all = "error" }

@@ -1,0 +1,31 @@
+# Git and Version Control
+.git
+.gitignore
+
+# Dependencies and Local Environments
+node_modules
+jspm_packages
+venv
+env/
+.env*
+
+# Build Outputs and Caches
+dist/
+build/
+target/
+*.log
+*.sqlite
+.cache
+
+# IDE and Editor Files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker Files and Documentation
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+# README.md
+LICENSE
