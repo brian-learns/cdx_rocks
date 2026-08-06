@@ -8,6 +8,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./all_warc_paths.txt.zst:/app/all_warc_paths.txt.zst
       - ./rocksdb_index:/app/data
     environment:
       - ENV=production

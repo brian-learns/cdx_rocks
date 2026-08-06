@@ -1,13 +1,22 @@
 REQUIRED_EXECUTABLES = uv rm find
 
-.PHONY: help check test clean testpackages checkdeps
+.PHONY: help check test clean testpackages checkdeps loaddata
 
 help:
 	@echo ""
+	@echo "  make loaddata   Load api data from hugging face"
 	@echo "  make check      Run ultra-fast static testing pipeline (ruff, bandit, vulture, etc.)"
 	@echo "  make test       Run static checks followed immediately by pytest"
 	@echo "  make clean      Wipe out test tool cache tracking footprints"
 	@echo "  make init       Initialize new project with uv and test setup"
+
+loaddata: rocksdb_index all_warc_paths.txt.zst
+
+rocksdb_index:
+	uvx hf sync hf://buckets/brian-learns/cc-news-cdx-server-storage rocksdb_index
+
+all_warc_paths.txt.zst:
+	hf download hf://datasets/brian-learns/cdx-cc-news/all_warc_paths.txt.zst --local-dir .
 
 check:
 	@echo "\n— [An extremely fast Python linter and code formatter](https://docs.astral.sh/ruff/)"

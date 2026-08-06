@@ -31,3 +31,4 @@ docker-compose*.yml
 LICENSE
 
 rocksdb_index/
+all_warc_paths.txt.zst

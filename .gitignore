@@ -11,3 +11,4 @@ wheels/
 
 rocksdb_index
 rocksdb_index/
+all_warc_paths.txt.zst
