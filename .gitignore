@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+rocksdb_index
+rocksdb_index/
