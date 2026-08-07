@@ -17,3 +17,18 @@ container-compose up
 CDX_PORT=8000 docker compose up
 ```
 
+## Local Setup
+set these environmental variables
+ * `ROCKS_READONLY` path to a readonly files
+ * `ROCKS_SHADOW` path to fake rocksdb that rockdict will use
+ * `CATALOG_PATH` path to the master list of WARC files
+
+```bash
+uv run cdx-rocks "$ROCKS_READONLY" "$ROCKS_SHADOW"
+```
+
+## tests
+
+```bash
+make test
+```

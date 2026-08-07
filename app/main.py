@@ -1,7 +1,6 @@
 import logging
 import os
 import struct
-import subprocess
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated
@@ -13,13 +12,15 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from rocksdict import AccessType, DBCompressionType, Options, Rdict
 
+from cdx_rocks import setup_shadow
+
 logger = logging.getLogger("uvicorn.error")
 
 # --- Storage Paths ---
 ROCKS_READONLY = os.getenv("ROCKS_READONLY", "/data")
 ROCKS_SHADOW = os.getenv("ROCKS_SHADOW", "/code/rocksdb/")
 if not Path(ROCKS_SHADOW).is_dir():
-    subprocess.run(["cdx-rocks", ROCKS_READONLY, ROCKS_SHADOW], check=True)
+    setup_shadow(Path(ROCKS_READONLY), Path(ROCKS_SHADOW))
 
 CATALOG_PATH = os.getenv("CATALOG_PATH", "/code/all_warc_paths.txt.zst")
 
@@ -51,6 +52,8 @@ IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # --- Pydantic Schema Definitions ---
 class CaptureResult(BaseModel):
+    """A single archive capture record returned from the index lookup."""
+
     surt_key: Annotated[str, Field(description="SURT-formatted key prefix")]
     timestamp: Annotated[str, Field(description="Capture timestamp (YYYYMMDDhhmmss)")]
     warc_path: Annotated[str, Field(description="Path to the WARC file in Common Crawl")]
@@ -59,6 +62,8 @@ class CaptureResult(BaseModel):
 
 
 class LookupResponse(BaseModel):
+    """Response body for a CDX index lookup query."""
+
     query_url: Annotated[str, Field(description="Original requested URL")]
     surt_prefix: Annotated[str, Field(description="SURT string used for lookup")]
     exact_match: Annotated[bool, Field(description="Whether exact matching was used")]
@@ -92,9 +97,12 @@ def query_index(url: str, exact_match: bool = False, limit: int = 10, at: str | 
         prefix_bytes = surt_str.encode("utf-8")
         from_key = prefix_bytes
 
-    results = []
+    results: list[dict[str, str | int]] = []
 
     for key, value in GLOBAL_DB.items(from_key=from_key):
+        if not isinstance(key, bytes):
+            continue
+
         if not key.startswith(prefix_bytes):
             break
 
@@ -128,7 +136,11 @@ def query_index(url: str, exact_match: bool = False, limit: int = 10, at: str | 
         with suppress(ValueError):
             target_num = int(target_ts)
             results.sort(
-                key=lambda r: abs(int(r["timestamp"]) - target_num) if r["timestamp"].isdigit() else float("inf")
+                key=lambda r: (
+                    abs(int(r["timestamp"]) - target_num)
+                    if isinstance(r["timestamp"], str) and r["timestamp"].isdigit()
+                    else float("inf")
+                )
             )
 
         results = results[:limit]
@@ -139,6 +151,7 @@ def query_index(url: str, exact_match: bool = False, limit: int = 10, at: str | 
 # --- FastAPI Startup/Shutdown Lifespan ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """FastAPI startup/shutdown manager: loads the WARC catalog and mounts the RocksDB index."""
     global ID_TO_PATH, GLOBAL_DB
 
     print("Loading global WARC path catalog into memory...")
@@ -169,6 +182,7 @@ app = FastAPI(title="Common Crawl News Index Gateway", lifespan=lifespan, descri
 
 @app.get("/", include_in_schema=False)
 async def docs_redirect():
+    """Redirect the root URL to the Swagger/OpenAPI docs page."""
     return RedirectResponse(url="/docs")
 
 
