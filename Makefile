@@ -33,7 +33,7 @@ check:
 	uv run refurb app/ src/
 
 	@echo "\n— [An extremely fast Python type checker and language server]( https://docs.astral.sh/ty/)"
-	#uv run ty check app/ src/
+	uv run ty check app/ src/
 
 	@echo "\n— [Interrogate a codebase for docstring coverage](https://interrogate.readthedocs.io/en/latest/)"
 	#uv run interrogate app/ src/

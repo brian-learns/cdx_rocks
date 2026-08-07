@@ -93,9 +93,12 @@ def query_index(url: str, exact_match: bool = False, limit: int = 10, at: str | 
         prefix_bytes = surt_str.encode("utf-8")
         from_key = prefix_bytes
 
-    results = []
+    results: list[dict[str, str | int]] = []
 
     for key, value in GLOBAL_DB.items(from_key=from_key):
+        if not isinstance(key, bytes):
+            continue
+
         if not key.startswith(prefix_bytes):
             break
 
@@ -129,7 +132,11 @@ def query_index(url: str, exact_match: bool = False, limit: int = 10, at: str | 
         with suppress(ValueError):
             target_num = int(target_ts)
             results.sort(
-                key=lambda r: abs(int(r["timestamp"]) - target_num) if r["timestamp"].isdigit() else float("inf")
+                key=lambda r: (
+                    abs(int(r["timestamp"]) - target_num)
+                    if isinstance(r["timestamp"], str) and r["timestamp"].isdigit()
+                    else float("inf")
+                )
             )
 
         results = results[:limit]
