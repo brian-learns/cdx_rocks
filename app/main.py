@@ -1,7 +1,6 @@
 import logging
 import os
 import struct
-import subprocess
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated
@@ -13,13 +12,15 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from rocksdict import AccessType, DBCompressionType, Options, Rdict
 
+from cdx_rocks import setup_shadow
+
 logger = logging.getLogger("uvicorn.error")
 
 # --- Storage Paths ---
 ROCKS_READONLY = os.getenv("ROCKS_READONLY", "/data")
 ROCKS_SHADOW = os.getenv("ROCKS_SHADOW", "/code/rocksdb/")
 if not Path(ROCKS_SHADOW).is_dir():
-    subprocess.run(["cdx-rocks", ROCKS_READONLY, ROCKS_SHADOW], check=True)
+    setup_shadow(Path(ROCKS_READONLY), Path(ROCKS_SHADOW))
 
 CATALOG_PATH = os.getenv("CATALOG_PATH", "/code/all_warc_paths.txt.zst")
 

@@ -5,35 +5,35 @@ from pathlib import Path
 
 CONFIG_FILENAME = "rocksdict-config.json"
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Workaround for rocksdict read-only bug by symlinking DB files and copying config."
-    )
-    parser.add_argument(
-        "rocksdb_dir",
-        type=Path,
-        help="Path to the source (read-only) RocksDB directory"
-    )
-    parser.add_argument(
-        "linksdir",
-        type=Path,
-        help="Path to the destination links directory"
-    )
 
-    args = parser.parse_args()
+def setup_shadow(rocksdb_dir: Path, linksdir: Path) -> Path:
+    """Create a writable shadow of a read-only RocksDB directory.
 
-    rocksdb_dir = args.rocksdb_dir.resolve()
-    linksdir = args.linksdir.resolve()
+    Symlinks all DB files/folders from *rocksdb_dir* into *linksdir*,
+    except ``rocksdict-config.json`` which is copied (not linked).
 
-    # Validate source directory
+    This works around the rocksdict read-only bug that prevents opening
+    a database from a truly read-only mount.
+
+    Args:
+        rocksdb_dir: Path to the source (read-only) RocksDB directory.
+        linksdir: Path to the destination shadow directory.
+
+    Returns:
+        The resolved path to the shadow directory.
+
+    Raises:
+        FileNotFoundError: If *rocksdb_dir* does not exist or is not a directory.
+    """
+    rocksdb_dir = Path(rocksdb_dir).resolve()
+    linksdir = Path(linksdir).resolve()
+
     if not rocksdb_dir.is_dir():
-        print(f"Error: Source directory '{rocksdb_dir}' does not exist or is not a directory.", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"Source directory '{rocksdb_dir}' does not exist or is not a directory.")
 
-    # 1. Create linksdir if it does not exist
+    # Create linksdir if it does not exist
     linksdir.mkdir(parents=True, exist_ok=True)
 
-    # Process each item in the rocksdb directory
     for item in rocksdb_dir.iterdir():
         target_path = linksdir / item.name
 
@@ -49,11 +49,36 @@ def main():
                 target_path.unlink()
 
         if item.name == CONFIG_FILENAME:
-            # 3. Create a copy of rocksdict-config.json in the linksdir
             shutil.copy2(item, target_path)
         else:
-            # 2. Create symbolic links for each file/folder except rocksdict-config.json
             target_path.symlink_to(item.resolve())
+
+    return linksdir
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Workaround for rocksdict read-only bug by symlinking DB files and copying config."
+    )
+    parser.add_argument(
+        "rocksdb_dir",
+        type=Path,
+        help="Path to the source (read-only) RocksDB directory",
+    )
+    parser.add_argument(
+        "linksdir",
+        type=Path,
+        help="Path to the destination links directory",
+    )
+
+    args = parser.parse_args()
+
+    try:
+        setup_shadow(args.rocksdb_dir, args.linksdir)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
