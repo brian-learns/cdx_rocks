@@ -14,5 +14,11 @@ services:
     environment:
       - ENV=production
       - PYTHONUNBUFFERED=1
-      - DEBUG=${DEBUG}
+      - ROCKS_BUCKET_DIR=/app/data
+      - ROCKS_LOG_DIR=/app/rocksdb_logs/
+      - CATALOG_PATH=/app/all_warc_paths.txt.zst
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536

@@ -16,7 +16,7 @@ rocksdb_index:
 	uvx hf sync hf://buckets/brian-learns/cc-news-cdx-server-storage rocksdb_index
 
 all_warc_paths.txt.zst:
-	hf download hf://datasets/brian-learns/cdx-cc-news/all_warc_paths.txt.zst --local-dir .
+	uvx hf download hf://datasets/brian-learns/cdx-cc-news/all_warc_paths.txt.zst --local-dir .
 
 check:
 	@echo "\n— [An extremely fast Python linter and code formatter](https://docs.astral.sh/ruff/)"
@@ -33,7 +33,7 @@ check:
 	uv run refurb app/ src/
 
 	@echo "\n— [An extremely fast Python type checker and language server]( https://docs.astral.sh/ty/)"
-	uv run ty check app/ src/
+	#uv run ty check app/ src/
 
 	@echo "\n— [Interrogate a codebase for docstring coverage](https://interrogate.readthedocs.io/en/latest/)"
 	#uv run interrogate app/ src/

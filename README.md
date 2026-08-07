@@ -1,7 +1,19 @@
 # `cdx_rocks`
 
-will be the server component for https://github.com/brian-learns/ccnget
+`/lookup` server component for https://github.com/brian-learns/ccnget
 
-right now, it's a minimal FastAPI app with docker-compose.yml
+## Download Data
+downloads over 75G of rocksdb index files and master catalog file of warc paths.
+```bash
+make loaddata
+````
 
-Put the data in ./rocksdb_index and it will show up at /app/data in the container
+## Run the server
+```bash
+docker compose up
+# or on macOS
+container-compose up
+# change the port
+CDX_PORT=8000 docker compose up
+```
+
