@@ -57,6 +57,7 @@ def setup_shadow(rocksdb_dir: Path, linksdir: Path) -> Path:
 
 
 def main() -> None:
+    """CLI entry point: parse arguments and create a writable shadow of a read-only RocksDB directory."""
     parser = argparse.ArgumentParser(
         description="Workaround for rocksdict read-only bug by symlinking DB files and copying config."
     )
