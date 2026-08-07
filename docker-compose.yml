@@ -22,3 +22,9 @@ services:
       nofile:
         soft: 65536
         hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 4gb
+        reservations:
+          memory: 3gb
