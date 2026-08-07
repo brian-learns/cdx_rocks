@@ -10,12 +10,12 @@ services:
       - "${CDX_PORT:-7860}:7860"
     volumes:
       - ./all_warc_paths.txt.zst:/app/all_warc_paths.txt.zst
-      - ./rocksdb_index:/app/data
+      - ./rocksdb_index:/app/data:ro
     environment:
       - ENV=production
       - PYTHONUNBUFFERED=1
-      - ROCKS_BUCKET_DIR=/app/data
-      - ROCKS_LOG_DIR=/app/rocksdb_logs/
+      - ROCKS_READONLY=/app/data
+      - ROCKS_SHADOW=/app/rocksdb
       - CATALOG_PATH=/app/all_warc_paths.txt.zst
     restart: unless-stopped
     ulimits:

@@ -1,6 +1,7 @@
 import logging
 import os
 import struct
+import subprocess
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated
@@ -15,9 +16,11 @@ from rocksdict import AccessType, DBCompressionType, Options, Rdict
 logger = logging.getLogger("uvicorn.error")
 
 # --- Storage Paths ---
-ROCKS_BUCKET_DIR = os.getenv("ROCKS_BUCKET_DIR", "/data")
-ROCKS_LOG_DIR = os.getenv("ROCKS_LOG_DIR", "/code/rocksdb_logs/")
-Path(ROCKS_LOG_DIR).mkdir(exist_ok=True, parents=True)
+ROCKS_READONLY = os.getenv("ROCKS_READONLY", "/data")
+ROCKS_SHADOW = os.getenv("ROCKS_SHADOW", "/code/rocksdb/")
+if not Path(ROCKS_SHADOW).is_dir():
+    subprocess.run(["cdx-rocks", ROCKS_READONLY, ROCKS_SHADOW], check=True)
+
 CATALOG_PATH = os.getenv("CATALOG_PATH", "/code/all_warc_paths.txt.zst")
 
 ID_TO_PATH = {}
@@ -149,12 +152,11 @@ async def lifespan(app: FastAPI):
 
     opts = Options(raw_mode=True)
     opts.set_compression_type(DBCompressionType.zstd())
-    opts.set_db_log_dir(ROCKS_LOG_DIR)
 
     print("Mounting RocksDB Index...")
-    GLOBAL_DB = Rdict(ROCKS_BUCKET_DIR, options=opts, access_type=AccessType.read_only())
+    GLOBAL_DB = Rdict(ROCKS_SHADOW, options=opts, access_type=AccessType.read_only())
 
-    dir_path = Path(ROCKS_BUCKET_DIR)
+    dir_path = Path(ROCKS_SHADOW)
     file_count = sum(1 for x in dir_path.iterdir() if x.is_file())
     print(f"Files in directory: {file_count}")
     print("Database mounted successfully.")

@@ -36,7 +36,9 @@ RUN groupadd -r fastapi && useradd -r -g fastapi fastapi
 # Copy python packages and the native CLI executable cleanly
 COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /usr/local/bin/fastapi /usr/local/bin/fastapi
+COPY --from=builder /usr/local/bin/cdx-rocks /usr/local/bin/cdx-rocks
 COPY --from=builder /app/app /app/app
+COPY ./src /app/src
 
 RUN mkdir -p /app/data && chown -R fastapi:fastapi /app
 
