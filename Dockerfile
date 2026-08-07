@@ -45,4 +45,7 @@ RUN mkdir -p /app/data && chown -R fastapi:fastapi /app
 USER fastapi
 VOLUME ["/app/data"]
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD python -c "import requests; requests.get('http://localhost:7860/docs').raise_for_status()"
 CMD ["fastapi", "run", "app/main.py", "--host", "0.0.0.0", "--port", "7860"]

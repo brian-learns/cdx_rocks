@@ -17,6 +17,8 @@ container-compose up
 CDX_PORT=8000 docker compose up
 # rebuild
 docker compose up --build
+# get on the running instance
+docker compose exec web /bin/sh
 ```
 
 ## Local Setup
