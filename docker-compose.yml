@@ -1,3 +1,4 @@
+name: cdx-rocks
 services:
   web:
     build:
@@ -6,11 +7,12 @@ services:
     image: cdx-rocks:latest
     container_name: cdx-rocks-app
     ports:
-      - "8000:8000"
+      - "${CDX_PORT:-7860}:7860"
     volumes:
       - ./all_warc_paths.txt.zst:/app/all_warc_paths.txt.zst
       - ./rocksdb_index:/app/data
     environment:
       - ENV=production
       - PYTHONUNBUFFERED=1
+      - DEBUG=${DEBUG}
     restart: unless-stopped
