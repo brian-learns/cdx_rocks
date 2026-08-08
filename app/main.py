@@ -14,25 +14,6 @@ from rocksdict import AccessType, DBCompressionType, Options, Rdict
 
 from cdx_rocks import setup_shadow
 
-logger = logging.getLogger("uvicorn.error")
-
-# Suppress /health access log lines
-access_logger = logging.getLogger("uvicorn.access")
-
-
-class HealthCheckFilter(logging.Filter):
-    """Drop access-log records for /health so Docker healthcheck pings don't flood stdout."""
-
-    @override
-    def filter(self, record: logging.LogRecord) -> bool:
-        # Check the fully formatted log message for /health
-        if "/health" in record.getMessage():
-            return False
-        return True
-
-
-access_logger.addFilter(HealthCheckFilter())
-
 # --- Storage Paths ---
 ROCKS_READONLY = os.getenv("ROCKS_READONLY", "/data")
 ROCKS_SHADOW = os.getenv("ROCKS_SHADOW", "/code/rocksdb/")
@@ -90,6 +71,25 @@ class LookupResponse(BaseModel):
     total_results: Annotated[int, Field(description="Number of results returned")]
     limit: Annotated[int, Field(description="Maximum results cap requested")]
     results: Annotated[list[CaptureResult], Field(description="List of matched WARC captures")]
+
+
+# --- logging ---
+logger = logging.getLogger("uvicorn.error")
+access_logger = logging.getLogger("uvicorn.access")
+
+
+class HealthCheckFilter(logging.Filter):
+    """Drop access-log records for /health so Docker healthcheck pings don't flood stdout."""
+
+    @override
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Check the fully formatted log message for /health
+        if "/health" in record.getMessage():
+            return False
+        return True
+
+
+access_logger.addFilter(HealthCheckFilter())
 
 
 # --- Core Index Query Engine ---
@@ -173,25 +173,25 @@ async def lifespan(app: FastAPI):
     """FastAPI startup/shutdown manager: loads the WARC catalog and mounts the RocksDB index."""
     global ID_TO_PATH, GLOBAL_DB
 
-    print("Loading global WARC path catalog into memory...")
+    logger.info("Loading global WARC path catalog into memory...")
     with zstd.open(CATALOG_PATH, mode="rt", encoding="utf-8") as text_stream:
         for global_id, line in enumerate(text_stream, start=1):
             full_path = line.strip()
             if full_path:
                 ID_TO_PATH[global_id] = full_path
 
-    print(f"Catalog loaded ({len(ID_TO_PATH):,} paths).")
+    logger.info(f"Catalog loaded ({len(ID_TO_PATH):,} paths).")
 
     opts = Options(raw_mode=True)
     opts.set_compression_type(DBCompressionType.zstd())
 
-    print("Mounting RocksDB Index...")
+    logger.info("Mounting RocksDB Index...")
     GLOBAL_DB = Rdict(ROCKS_SHADOW, options=opts, access_type=AccessType.read_only())
 
     dir_path = Path(ROCKS_SHADOW)
     file_count = sum(1 for x in dir_path.iterdir() if x.is_file())
-    print(f"Files in directory: {file_count}")
-    print("Database mounted successfully.")
+    logger.info(f"Files in directory: {file_count}")
+    logger.info("Database mounted successfully.")
 
     yield
 
