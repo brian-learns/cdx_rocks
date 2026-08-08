@@ -74,7 +74,11 @@ class LookupResponse(BaseModel):
 
 
 # --- logging ---
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
 access_logger = logging.getLogger("uvicorn.access")
 
 
