@@ -25,9 +25,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4gb
+          memory: 2.2gb
         reservations:
-          memory: 3gb
+          memory: 2gb
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:7860/health').raise_for_status()"]
       interval: 30s
