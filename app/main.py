@@ -3,7 +3,7 @@ import os
 import struct
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, override
 
 import surt
 import zstandard as zstd
@@ -15,6 +15,23 @@ from rocksdict import AccessType, DBCompressionType, Options, Rdict
 from cdx_rocks import setup_shadow
 
 logger = logging.getLogger("uvicorn.error")
+
+# Suppress /health access log lines
+access_logger = logging.getLogger("uvicorn.access")
+
+
+class HealthCheckFilter(logging.Filter):
+    """Drop access-log records for /health so Docker healthcheck pings don't flood stdout."""
+
+    @override
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Check the fully formatted log message for /health
+        if "/health" in record.getMessage():
+            return False
+        return True
+
+
+access_logger.addFilter(HealthCheckFilter())
 
 # --- Storage Paths ---
 ROCKS_READONLY = os.getenv("ROCKS_READONLY", "/data")
@@ -184,6 +201,12 @@ app = FastAPI(title="Common Crawl News Index Gateway", lifespan=lifespan, descri
 async def docs_redirect():
     """Redirect the root URL to the Swagger/OpenAPI docs page."""
     return RedirectResponse(url="/docs")
+
+
+@app.get("/health", include_in_schema=False)
+async def health():
+    """Minimal healthcheck endpoint. Returns 200 when the app is alive."""
+    return {"status": "ok"}
 
 
 # --- FastAPI Route ---

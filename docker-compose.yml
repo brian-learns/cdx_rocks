@@ -29,7 +29,7 @@ services:
         reservations:
           memory: 3gb
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:7860/docs').raise_for_status()"]
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:7860/health').raise_for_status()"]
       interval: 30s
       timeout: 5s
       start_period: 5s

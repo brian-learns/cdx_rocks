@@ -1,0 +1,13 @@
+{
+  "source": "saved",
+  "recipe": {
+    "name": "FastAPI app",
+    "kind": "fastapi",
+    "bootstrap": ["uv sync"],
+    "build": [],
+    "test": ["make test", "make check"],
+    "start": "uv run fastapi run app/main.py --host 0.0.0.0 --port 7860",
+    "port": 7860,
+    "readinessPath": "/health"
+  }
+}
