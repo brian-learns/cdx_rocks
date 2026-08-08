@@ -1,0 +1,8 @@
+
+locust docs https://docs.locust.io/en/stable/llms.txt
+
+tests/1000urls.txt has 1000 random urls that should be in the index
+
+/lookup?url= endpoint needs to be tested
+
+can you write a locust test that selects urls randomly to test with the endpoint?

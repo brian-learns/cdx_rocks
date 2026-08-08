@@ -36,3 +36,8 @@ uv run cdx-rocks "$ROCKS_READONLY" "$ROCKS_SHADOW"
 ```bash
 make test
 ```
+
+load test
+```bash
+uv run locust -f tests/locustfile.py
+```
