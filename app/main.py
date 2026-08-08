@@ -49,6 +49,8 @@ URL lookup tool for [Common Crawl News Dataset](https://data.commoncrawl.org/cra
 
 Command line client [`ccnget` on github](https://github.com/brian-learns/ccnget).
 
+This server [`cdx_rocks` on github](https://github.com/brian-learns/cdx_rocks).
+
 Built from the [brian-learns/cdx-cc-news Dataset](https://huggingface.co/datasets/brian-learns/cdx-cc-news)
 
 Files retrieved from Common Crawl are subject to [Common Crawl Terms of Use](https://commoncrawl.org/terms-of-use) and the original publisher's copyright.
