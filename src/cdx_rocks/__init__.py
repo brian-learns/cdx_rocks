@@ -1,9 +1,29 @@
 import argparse
+import logging
+import os
 import shutil
 import sys
 from pathlib import Path
 
 CONFIG_FILENAME = "rocksdict-config.json"
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
+
+
+def get_rocks_dir(rocksdb_dir: str, linksdir: str) -> str:
+    """returns a rocks dir where CONFIG_FILENAME is writable"""
+    try:
+        testfile = Path(rocksdb_dir) / CONFIG_FILENAME
+        with testfile.open("a"):
+            pass
+        return rocksdb_dir
+    except (PermissionError, FileNotFoundError, OSError):
+        logger.info(f"{rocksdb_dir}/{CONFIG_FILENAME} write error, creating shadow {linksdir}")
+        return str(setup_shadow(Path(rocksdb_dir), Path(linksdir)))
 
 
 def setup_shadow(rocksdb_dir: Path, linksdir: Path) -> Path:

@@ -1,6 +1,7 @@
 import logging
 import os
 import struct
+import tempfile
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated, override
@@ -12,14 +13,20 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from rocksdict import AccessType, DBCompressionType, Options, Rdict
 
-from cdx_rocks import setup_shadow
+from cdx_rocks import get_rocks_dir
+
+# --- logging ---
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
+access_logger = logging.getLogger("uvicorn.access")
+
 
 # --- Storage Paths ---
-ROCKS_READONLY = os.getenv("ROCKS_READONLY", "/data")
-ROCKS_SHADOW = os.getenv("ROCKS_SHADOW", "/code/rocksdb/")
-if not Path(ROCKS_SHADOW).is_dir():
-    setup_shadow(Path(ROCKS_READONLY), Path(ROCKS_SHADOW))
-
+temp_shadow = tempfile.TemporaryDirectory(prefix="cdx_", suffix="_rocks")
+ROCKSDB_DIR = get_rocks_dir(os.getenv("CDX_ROCKS", "/data"), temp_shadow.name)
 CATALOG_PATH = os.getenv("CATALOG_PATH", "/code/all_warc_paths.txt.zst")
 
 ID_TO_PATH = {}
@@ -71,15 +78,6 @@ class LookupResponse(BaseModel):
     total_results: Annotated[int, Field(description="Number of results returned")]
     limit: Annotated[int, Field(description="Maximum results cap requested")]
     results: Annotated[list[CaptureResult], Field(description="List of matched WARC captures")]
-
-
-# --- logging ---
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
-access_logger = logging.getLogger("uvicorn.access")
 
 
 class HealthCheckFilter(logging.Filter):
@@ -189,13 +187,13 @@ async def lifespan(app: FastAPI):
     opts = Options(raw_mode=True)
     opts.set_compression_type(DBCompressionType.zstd())
 
-    logger.info("Mounting RocksDB Index...")
-    GLOBAL_DB = Rdict(ROCKS_SHADOW, options=opts, access_type=AccessType.read_only())
+    logger.info(f"Mounting RocksDB Index {ROCKSDB_DIR}...")
 
-    dir_path = Path(ROCKS_SHADOW)
+    dir_path = Path(ROCKSDB_DIR)
     file_count = sum(1 for x in dir_path.iterdir() if x.is_file())
     logger.info(f"Files in directory: {file_count}")
     logger.info("Database mounted successfully.")
+    GLOBAL_DB = Rdict(ROCKSDB_DIR, options=opts, access_type=AccessType.read_only())
 
     yield
 

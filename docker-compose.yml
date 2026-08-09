@@ -14,8 +14,7 @@ services:
     environment:
       - ENV=production
       - PYTHONUNBUFFERED=1
-      - ROCKS_READONLY=/app/data
-      - ROCKS_SHADOW=/app/rocksdb
+      - CDX_ROCKS=/app/data
       - CATALOG_PATH=/app/all_warc_paths.txt.zst
     restart: unless-stopped
     ulimits:
