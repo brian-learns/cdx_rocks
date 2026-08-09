@@ -23,14 +23,18 @@ logging.basicConfig(
 )
 access_logger = logging.getLogger("uvicorn.access")
 
-
 # --- Storage Paths ---
-temp_shadow = tempfile.TemporaryDirectory(prefix="cdx_", suffix="_rocks")
-ROCKSDB_DIR = get_rocks_dir(os.getenv("CDX_ROCKS", "/data"), temp_shadow.name)
+ROCKSDB_DIR = get_rocks_dir(os.getenv("CDX_ROCKS", "/data"), tempfile.mkdtemp(prefix="cdx_", suffix="_rocks"))
 CATALOG_PATH = os.getenv("CATALOG_PATH", "/code/all_warc_paths.txt.zst")
 
-ID_TO_PATH = {}
-GLOBAL_DB = None
+# --- RocksDB value format ---
+# Each value is a 16-byte big-endian struct:
+#   H (uint16) — WARC file ID (index into the catalog)
+#   Q (uint64) — Byte offset within the WARC file
+#   I (uint32) — Record length in bytes
+# Total: 2 + 8 + 4 = 14 bytes (struct alignment pads to 16)
+VALUE_FORMAT = "!HQI"
+VALUE_SIZE = struct.calcsize(VALUE_FORMAT)
 
 DESCRIPTION = """
 URL lookup tool for [Common Crawl News Dataset](https://data.commoncrawl.org/crawl-data/CC-NEWS/index.html) indexed in RocksDB with a simple API.
@@ -95,14 +99,17 @@ access_logger.addFilter(HealthCheckFilter())
 
 
 # --- Core Index Query Engine ---
-def query_index(url: str, exact_match: bool = False, limit: int = 10, at: str | None = None):
+def query_index(app: FastAPI, url: str, exact_match: bool = False, limit: int = 10, at: str | None = None):
     """Core lookup engine:
 
     - exact_match=True + at: Seeks directly in RocksDB to the first record >= 'at' timestamp.
     - exact_match=False + at: Scans prefix entries and returns closest matches sorted by proximity to 'at'.
     """
-    if GLOBAL_DB is None:
+    db: Rdict | None = getattr(app.state, "db", None)
+    if db is None:
         raise ValueError("Database engine is offline.")
+
+    catalog: dict[int, str] = getattr(app.state, "catalog", {})
 
     surt_str = surt.surt(url)
 
@@ -120,7 +127,7 @@ def query_index(url: str, exact_match: bool = False, limit: int = 10, at: str | 
 
     results: list[dict[str, str | int]] = []
 
-    for key, value in GLOBAL_DB.items(from_key=from_key):
+    for key, value in db.items(from_key=from_key):
         if not isinstance(key, bytes):
             continue
 
@@ -133,8 +140,8 @@ def query_index(url: str, exact_match: bool = False, limit: int = 10, at: str | 
         else:
             surt_key, timestamp = decoded_key, ""
 
-        absolute_id, offset, length = struct.unpack("!HQI", value)
-        warc_path = ID_TO_PATH.get(absolute_id, "PATH_NOT_FOUND")
+        absolute_id, offset, length = struct.unpack(VALUE_FORMAT, value)
+        warc_path = catalog.get(absolute_id, "PATH_NOT_FOUND")
 
         results.append(
             {
@@ -173,29 +180,32 @@ def query_index(url: str, exact_match: bool = False, limit: int = 10, at: str | 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI startup/shutdown manager: loads the WARC catalog and mounts the RocksDB index."""
-    global ID_TO_PATH, GLOBAL_DB
-
     logger.info("Loading global WARC path catalog into memory...")
+    catalog: dict[int, str] = {}
     with zstd.open(CATALOG_PATH, mode="rt", encoding="utf-8") as text_stream:
         for global_id, line in enumerate(text_stream, start=1):
             full_path = line.strip()
             if full_path:
-                ID_TO_PATH[global_id] = full_path
+                catalog[global_id] = full_path
 
-    logger.info(f"Catalog loaded ({len(ID_TO_PATH):,} paths).")
+    logger.info(f"Catalog loaded ({len(catalog):,} paths).")
+    app.state.catalog = catalog
 
     opts = Options(raw_mode=True)
     opts.set_compression_type(DBCompressionType.zstd())
 
-    logger.info(f"Mounting RocksDB Index {ROCKSDB_DIR}...")
-
     dir_path = Path(ROCKSDB_DIR)
     file_count = sum(1 for x in dir_path.iterdir() if x.is_file())
-    logger.info(f"Files in directory: {file_count}")
-    logger.info("Database mounted successfully.")
-    GLOBAL_DB = Rdict(ROCKSDB_DIR, options=opts, access_type=AccessType.read_only())
+    logger.info(f"RocksDB directory: {ROCKSDB_DIR} ({file_count} files)")
+
+    logger.info("Opening RocksDB index...")
+    db = Rdict(ROCKSDB_DIR, options=opts, access_type=AccessType.read_only())
+    app.state.db = db
+    logger.info("Database opened successfully.")
 
     yield
+
+    db.close()
 
 
 app = FastAPI(title="Common Crawl News Index Gateway", lifespan=lifespan, description=DESCRIPTION, version="0.1.2")
@@ -228,7 +238,7 @@ async def lookup_endpoint(
 ):
     """REST API endpoint supporting exact, partial prefix, or timestamp-targeted matching."""
     try:
-        surt_prefix, captures = query_index(url, exact_match=exact, limit=limit, at=at)
+        surt_prefix, captures = query_index(app, url, exact_match=exact, limit=limit, at=at)
     except ValueError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:

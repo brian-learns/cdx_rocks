@@ -7,8 +7,7 @@ import pytest
 import surt
 from fastapi.testclient import TestClient
 
-# app.main is already imported by conftest.py so GLOBAL_DB / ID_TO_PATH
-# live in the same namespace as our patches.
+# app.main is already imported by conftest.py so app.state is available.
 from app import main  # noqa: F401
 
 
@@ -22,6 +21,9 @@ class MockRdict:
         if from_key is None:
             return list(self._items.items())
         return [(k, v) for k, v in self._items.items() if k >= from_key]
+
+    def close(self) -> None:
+        pass
 
 
 def _make_key(url: str, ts: str) -> bytes:
@@ -47,61 +49,90 @@ def db_and_catalog(tmp_path) -> tuple[MockRdict, dict[int, str]]:
     return MockRdict(db_items), catalog
 
 
+def _setup_state(mock_db: MockRdict, catalog: dict[int, str]) -> None:
+    """Set app.state.db and app.state.catalog for tests."""
+    main.app.state.db = mock_db
+    main.app.state.catalog = catalog
+
+
+def _clear_state() -> None:
+    """Clear app.state for tests that expect offline DB."""
+    if hasattr(main.app.state, "db"):
+        del main.app.state.db
+    if hasattr(main.app.state, "catalog"):
+        del main.app.state.catalog
+
+
 def test_query_index_exact_match(db_and_catalog):
     """Exact match returns all captures for the URL, limited by limit."""
     mock_db, catalog = db_and_catalog
-    with patch("app.main.GLOBAL_DB", mock_db), patch("app.main.ID_TO_PATH", catalog):
-        surt_prefix, results = main.query_index("https://example.com/page", exact_match=True)
+    _setup_state(mock_db, catalog)
+    try:
+        surt_prefix, results = main.query_index(main.app, "https://example.com/page", exact_match=True)
         assert surt_prefix == "com,example)/page"
         assert len(results) == 2  # default limit is 10, we have 2 entries for this URL
         assert results[0]["timestamp"] == "20260801120000"
         assert results[0]["warc_path"] == "/crawl-data/warc/2026/12/example.warc.gz"
         assert results[0]["offset"] == 0
         assert results[0]["length"] == 500
+    finally:
+        _clear_state()
 
 
 def test_query_index_limit(db_and_catalog):
     """Limit parameter caps results."""
     mock_db, catalog = db_and_catalog
-    with patch("app.main.GLOBAL_DB", mock_db), patch("app.main.ID_TO_PATH", catalog):
-        _surt_prefix, results = main.query_index("https://example.com/page", exact_match=True, limit=2)
+    _setup_state(mock_db, catalog)
+    try:
+        _surt_prefix, results = main.query_index(main.app, "https://example.com/page", exact_match=True, limit=2)
         assert len(results) == 2
+    finally:
+        _clear_state()
 
 
 def test_query_index_at_timestamp_seek(db_and_catalog):
     """at= with exact_match=True seeks from the given timestamp."""
     mock_db, catalog = db_and_catalog
-    with patch("app.main.GLOBAL_DB", mock_db), patch("app.main.ID_TO_PATH", catalog):
+    _setup_state(mock_db, catalog)
+    try:
         _surt_prefix, results = main.query_index(
-            "https://example.com/page", exact_match=True, at="20260802000000"
+            main.app, "https://example.com/page", exact_match=True, at="20260802000000"
         )
         # Should only return entries >= 20260802000000
         assert len(results) == 1
         assert results[0]["timestamp"] == "20260802130000"
+    finally:
+        _clear_state()
 
 
 def test_query_index_prefix_match(db_and_catalog):
     """exact_match=False uses SURT prefix — partial domain match."""
     mock_db, catalog = db_and_catalog
-    with patch("app.main.GLOBAL_DB", mock_db), patch("app.main.ID_TO_PATH", catalog):
-        _surt_prefix, results = main.query_index("https://example.com", exact_match=False)
+    _setup_state(mock_db, catalog)
+    try:
+        _surt_prefix, results = main.query_index(main.app, "https://example.com", exact_match=False)
         # Prefix "com,example)" matches all entries for example.com
         assert len(results) == 2
+    finally:
+        _clear_state()
 
 
 def test_query_index_not_found(db_and_catalog):
     """No matching keys returns empty results list."""
     mock_db, catalog = db_and_catalog
-    with patch("app.main.GLOBAL_DB", mock_db), patch("app.main.ID_TO_PATH", catalog):
-        _surt_prefix, results = main.query_index("https://nonexistent.io/page", exact_match=True)
+    _setup_state(mock_db, catalog)
+    try:
+        _surt_prefix, results = main.query_index(main.app, "https://nonexistent.io/page", exact_match=True)
         assert results == []
+    finally:
+        _clear_state()
 
 
 def test_query_index_db_offline():
-    """ValueError when GLOBAL_DB is None."""
-    with patch("app.main.GLOBAL_DB", None):
-        with pytest.raises(ValueError, match="Database engine is offline"):
-            main.query_index("https://example.com")
+    """ValueError when app.state.db is not set."""
+    _clear_state()
+    with pytest.raises(ValueError, match="Database engine is offline"):
+        main.query_index(main.app, "https://example.com")
 
 
 def test_lookup_endpoint_exact():
@@ -110,7 +141,9 @@ def test_lookup_endpoint_exact():
     db_items: dict[bytes, bytes] = {
         _make_key("https://example.com/page", "20260801120000"): _make_value(1, 0, 500),
     }
-    with patch("app.main.GLOBAL_DB", MockRdict(db_items)), patch("app.main.ID_TO_PATH", catalog):
+    mock_db = MockRdict(db_items)
+    _setup_state(mock_db, catalog)
+    try:
         client = TestClient(main.app)
         resp = client.get("/lookup", params={"url": "https://example.com/page", "exact": True})
         assert resp.status_code == 200
@@ -121,24 +154,29 @@ def test_lookup_endpoint_exact():
         assert body["total_results"] == 1
         assert len(body["results"]) == 1
         assert body["results"][0]["timestamp"] == "20260801120000"
+    finally:
+        _clear_state()
 
 
 def test_lookup_endpoint_not_found():
-    """GET /lookup returns 404 when no captures match."""
-    db_items: dict[bytes, bytes] = {}
-    catalog: dict[int, str] = {}
-    with patch("app.main.GLOBAL_DB", MockRdict(db_items)), patch("app.main.ID_TO_PATH", catalog):
+    """GET /lookup returns 200 with empty results when no captures match."""
+    mock_db = MockRdict({})
+    _setup_state(mock_db, {})
+    try:
         client = TestClient(main.app)
         resp = client.get("/lookup", params={"url": "https://missing.io/x"})
         assert resp.status_code == 200
+        assert resp.json()["total_results"] == 0
+    finally:
+        _clear_state()
 
 
 def test_lookup_endpoint_db_offline():
     """GET /lookup returns 500 when DB is offline."""
-    with patch("app.main.GLOBAL_DB", None):
-        client = TestClient(main.app)
-        resp = client.get("/lookup", params={"url": "https://example.com"})
-        assert resp.status_code == 500
+    _clear_state()
+    client = TestClient(main.app)
+    resp = client.get("/lookup", params={"url": "https://example.com"})
+    assert resp.status_code == 500
 
 
 def test_lookup_endpoint_limit_param():
@@ -149,11 +187,15 @@ def test_lookup_endpoint_limit_param():
         _make_key("https://example.com/b", "20260201000000"): _make_value(1, 100, 200),
         _make_key("https://example.com/c", "20260301000000"): _make_value(1, 300, 300),
     }
-    with patch("app.main.GLOBAL_DB", MockRdict(db_items)), patch("app.main.ID_TO_PATH", catalog):
+    mock_db = MockRdict(db_items)
+    _setup_state(mock_db, catalog)
+    try:
         client = TestClient(main.app)
         resp = client.get("/lookup", params={"url": "https://example.com", "exact": False, "limit": 2})
         assert resp.status_code == 200
         assert resp.json()["total_results"] == 2
+    finally:
+        _clear_state()
 
 
 def test_lookup_endpoint_at_param():
@@ -163,7 +205,9 @@ def test_lookup_endpoint_at_param():
         _make_key("https://example.com/page", "20260801120000"): _make_value(1, 0, 500),
         _make_key("https://example.com/page", "20260802130000"): _make_value(1, 500, 600),
     }
-    with patch("app.main.GLOBAL_DB", MockRdict(db_items)), patch("app.main.ID_TO_PATH", catalog):
+    mock_db = MockRdict(db_items)
+    _setup_state(mock_db, catalog)
+    try:
         client = TestClient(main.app)
         resp = client.get(
             "/lookup",
@@ -174,3 +218,5 @@ def test_lookup_endpoint_at_param():
         assert body["at_timestamp"] == "20260802000000"
         # Only entries >= 20260802000000
         assert body["total_results"] == 1
+    finally:
+        _clear_state()
