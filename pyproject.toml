@@ -1,7 +1,7 @@
 [project]
 name = "cdx-rocks"
 version = "0.1.0"
-description = "Add your description here"
+description = "RocksDB-powered CDX index server for Common Crawl News"
 readme = "README.md"
 authors = [
     { name = "brian-learns", email = "epitome-tampers.1v@icloud.com" }

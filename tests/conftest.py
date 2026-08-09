@@ -9,13 +9,13 @@ import tempfile
 import shutil
 import atexit
 
+import zstandard as zstd
+
 _tmpdir = tempfile.mkdtemp(prefix="cdx_rocks_test_")
 os.environ["CDX_ROCKS"] = _tmpdir
 os.environ["CATALOG_PATH"] = "/dev/null"
 
 # Mock zstandard.open so lifespan startup doesn't try to read a real catalog.
-import zstandard as zstd
-
 _orig_zstd_open = zstd.open
 
 
@@ -25,11 +25,13 @@ def _mock_zstd_open(*args, **kwargs):
 
 zstd.open = _mock_zstd_open  # type: ignore[attr-defined]
 
-# Now the real import — setup_shadow sees the temp dir exists so skips.
+# Now the real import
 from app import main  # noqa: F401, E402
 
-# Reset globals so tests can patch them cleanly.
-main.GLOBAL_DB = None  # type: ignore[assignment]
-main.ID_TO_PATH = {}  # type: ignore[assignment]
+# Reset app.state so tests can set it cleanly.
+if hasattr(main.app.state, "db"):
+    del main.app.state.db
+if hasattr(main.app.state, "catalog"):
+    del main.app.state.catalog
 
 atexit.register(shutil.rmtree, _tmpdir)
