@@ -234,9 +234,6 @@ async def lookup_endpoint(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Malformed URL payload: {e!s}") from e
 
-    if not captures:
-        raise HTTPException(status_code=404, detail="No matching captures found for prefix.")
-
     return {
         "query_url": url,
         "surt_prefix": surt_prefix,

@@ -130,7 +130,7 @@ def test_lookup_endpoint_not_found():
     with patch("app.main.GLOBAL_DB", MockRdict(db_items)), patch("app.main.ID_TO_PATH", catalog):
         client = TestClient(main.app)
         resp = client.get("/lookup", params={"url": "https://missing.io/x"})
-        assert resp.status_code == 404
+        assert resp.status_code == 200
 
 
 def test_lookup_endpoint_db_offline():
