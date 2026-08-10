@@ -8,7 +8,7 @@ URL lookup tool for [Common Crawl News Dataset](https://data.commoncrawl.org/cra
 Command line client [`ccnget` on github](https://github.com/brian-learns/ccnget).
 
 This server [`cdx_rocks` on github](https://github.com/brian-learns/cdx_rocks).
-v0.1.0 is the version of the server running now.
+v0.2.0 is the version of the server running now.
 
 Built from the [brian-learns/cdx-cc-news Dataset](https://huggingface.co/datasets/brian-learns/cdx-cc-news)
 
