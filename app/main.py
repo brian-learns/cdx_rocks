@@ -227,7 +227,13 @@ async def docs_redirect():
 
 @app.get("/health", include_in_schema=False)
 async def health():
-    """Minimal healthcheck endpoint. Returns 200 when the app is alive."""
+    """Healthcheck endpoint. Verifies catalog and RocksDB are loaded."""
+    db = getattr(app.state, "db", None)
+    catalog = getattr(app.state, "catalog", None)
+
+    if db is None or catalog is None:
+        raise HTTPException(status_code=503, detail="Index not ready.")
+
     return {"status": "ok"}
 
 
@@ -266,14 +272,16 @@ async def lookup_endpoint(
 @app.get("/extent", response_model=ExtentResponse)
 async def extent_endpoint():
     """show what content is indexed on this server"""
-    # TODO: get length of `app.state.catalog`
-    # TODO: get first file in `app.state.catalog`
-    # TODO: get last file in `app.state.catalog`
-    # app.state.catalog
+    catalog: dict[int, str] = getattr(app.state, "catalog", {})
+    if not catalog:
+        raise HTTPException(status_code=500, detail="Catalog not loaded.")
+
+    first_key = min(catalog)
+    last_key = max(catalog)
     return {
-        "file_extent": 51101,
-        "file_oldest": "crawl-data/CC-NEWS/2016/08/CC-NEWS-20160826124520-00000.warc.gz",
-        "file_newest": "crawl-data/CC-NEWS/2026/07/CC-NEWS-20260731214950-00313.warc.gz",
+        "file_extent": len(catalog),
+        "file_oldest": catalog[first_key],
+        "file_newest": catalog[last_key],
     }
 
 
