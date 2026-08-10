@@ -1,0 +1,2 @@
+curl http://0.0.0.0:7860/openapi.json | jq .  > openapi.json
+npx openapi-to-md openapi.json openapi.md
