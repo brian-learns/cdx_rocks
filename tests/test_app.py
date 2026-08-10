@@ -1,6 +1,8 @@
 """Tests for app/main.py — query_index() and FastAPI /lookup endpoint."""
 
 import struct
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +11,9 @@ from fastapi.testclient import TestClient
 
 # app.main is already imported by conftest.py so app.state is available.
 from app import main  # noqa: F401
+
+# conftest.py mocks zstd.open; grab the original that conftest saved.
+_orig_zstd_open = sys.modules["tests.conftest"]._orig_zstd_open  # type: ignore[attr-defined]
 
 
 class MockRdict:
@@ -220,3 +225,66 @@ def test_lookup_endpoint_at_param():
         assert body["total_results"] == 1
     finally:
         _clear_state()
+
+
+@pytest.fixture()
+def warc_catalog(tmp_path):
+    """Load the test WARC catalog file into a dict[int, str]."""
+    test_catalog_path = Path(__file__).parent / "test_warc_paths.txt.zst"
+    catalog: dict[int, str] = {}
+    with _orig_zstd_open(test_catalog_path, mode="rt", encoding="utf-8") as f:
+        for i, line in enumerate(f, start=1):
+            path = line.strip()
+            if path:
+                catalog[i] = path
+    return catalog
+
+
+def test_extent_endpoint(warc_catalog):
+    """GET /extent returns correct file count, oldest, and newest."""
+    mock_db = MockRdict({})
+    _setup_state(mock_db, warc_catalog)
+    try:
+        client = TestClient(main.app)
+        resp = client.get("/extent")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["file_extent"] == 10
+        assert body["file_oldest"] == "crawl-data/CC-NEWS/2016/08/CC-NEWS-20160826124520-00000.warc.gz"
+        assert body["file_newest"] == "crawl-data/CC-NEWS/2016/09/CC-NEWS-20160902145200-00009.warc.gz"
+    finally:
+        _clear_state()
+
+
+def test_extent_endpoint_empty_catalog():
+    """GET /extent returns 500 when catalog is empty."""
+    mock_db = MockRdict({})
+    _setup_state(mock_db, {})
+    try:
+        client = TestClient(main.app)
+        resp = client.get("/extent")
+        assert resp.status_code == 500
+    finally:
+        _clear_state()
+
+
+def test_health_endpoint_ready(warc_catalog):
+    """GET /health returns 200 when catalog and DB are loaded."""
+    mock_db = MockRdict({})
+    _setup_state(mock_db, warc_catalog)
+    try:
+        client = TestClient(main.app)
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+    finally:
+        _clear_state()
+
+
+def test_health_endpoint_not_ready():
+    """GET /health returns 503 when catalog or DB are not loaded."""
+    _clear_state()
+    client = TestClient(main.app)
+    resp = client.get("/health")
+    assert resp.status_code == 503
+    assert "not ready" in resp.json()["detail"].lower()
