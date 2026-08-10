@@ -84,6 +84,14 @@ class LookupResponse(BaseModel):
     results: Annotated[list[CaptureResult], Field(description="List of matched WARC captures")]
 
 
+class ExtentResponse(BaseModel):
+    """Extent of the WARC files in this index"""
+
+    file_extent: Annotated[int, Field(description="number of files covered by this index")]
+    file_oldest: Annotated[str, Field(description="first WARC file in this index")]
+    file_newest: Annotated[str, Field(description="last WARC file added to this index")]
+
+
 class HealthCheckFilter(logging.Filter):
     """Drop access-log records for /health so Docker healthcheck pings don't flood stdout."""
 
@@ -252,6 +260,20 @@ async def lookup_endpoint(
         "total_results": len(captures),
         "limit": limit,
         "results": captures,
+    }
+
+
+@app.get("/extent", response_model=ExtentResponse)
+async def extent_endpoint():
+    """show what content is indexed on this server"""
+    # TODO: get length of `app.state.catalog`
+    # TODO: get first file in `app.state.catalog`
+    # TODO: get last file in `app.state.catalog`
+    # app.state.catalog
+    return {
+        "file_extent": 51101,
+        "file_oldest": "crawl-data/CC-NEWS/2016/08/CC-NEWS-20160826124520-00000.warc.gz",
+        "file_newest": "crawl-data/CC-NEWS/2026/07/CC-NEWS-20260731214950-00313.warc.gz",
     }
 
 
