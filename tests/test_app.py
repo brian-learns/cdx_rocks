@@ -150,7 +150,7 @@ def test_lookup_endpoint_exact():
     _setup_state(mock_db, catalog)
     try:
         client = TestClient(main.app)
-        resp = client.get("/lookup", params={"url": "https://example.com/page", "exact": True})
+        resp = client.get("/cdx-index/lookup", params={"url": "https://example.com/page", "exact": True})
         assert resp.status_code == 200
         body = resp.json()
         assert body["query_url"] == "https://example.com/page"
@@ -169,7 +169,7 @@ def test_lookup_endpoint_not_found():
     _setup_state(mock_db, {})
     try:
         client = TestClient(main.app)
-        resp = client.get("/lookup", params={"url": "https://missing.io/x"})
+        resp = client.get("/cdx-index/lookup", params={"url": "https://missing.io/x"})
         assert resp.status_code == 200
         assert resp.json()["total_results"] == 0
     finally:
@@ -180,7 +180,7 @@ def test_lookup_endpoint_db_offline():
     """GET /lookup returns 500 when DB is offline."""
     _clear_state()
     client = TestClient(main.app)
-    resp = client.get("/lookup", params={"url": "https://example.com"})
+    resp = client.get("/cdx-index/lookup", params={"url": "https://example.com"})
     assert resp.status_code == 500
 
 
@@ -196,7 +196,7 @@ def test_lookup_endpoint_limit_param():
     _setup_state(mock_db, catalog)
     try:
         client = TestClient(main.app)
-        resp = client.get("/lookup", params={"url": "https://example.com", "exact": False, "limit": 2})
+        resp = client.get("/cdx-index/lookup", params={"url": "https://example.com", "exact": False, "limit": 2})
         assert resp.status_code == 200
         assert resp.json()["total_results"] == 2
     finally:
@@ -215,7 +215,7 @@ def test_lookup_endpoint_at_param():
     try:
         client = TestClient(main.app)
         resp = client.get(
-            "/lookup",
+            "/cdx-index/lookup",
             params={"url": "https://example.com/page", "exact": True, "at": "20260802000000"},
         )
         assert resp.status_code == 200
@@ -246,7 +246,7 @@ def test_extent_endpoint(warc_catalog):
     _setup_state(mock_db, warc_catalog)
     try:
         client = TestClient(main.app)
-        resp = client.get("/extent")
+        resp = client.get("/cdx-index/extent")
         assert resp.status_code == 200
         body = resp.json()
         assert body["file_extent"] == 10
@@ -262,7 +262,7 @@ def test_extent_endpoint_empty_catalog():
     _setup_state(mock_db, {})
     try:
         client = TestClient(main.app)
-        resp = client.get("/extent")
+        resp = client.get("/cdx-index/extent")
         assert resp.status_code == 500
     finally:
         _clear_state()

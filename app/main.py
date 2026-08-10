@@ -3,12 +3,13 @@ import os
 import struct
 import tempfile
 from contextlib import asynccontextmanager, suppress
+from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, override
 
 import surt
 import zstandard as zstd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from rocksdict import AccessType, DBCompressionType, Options, Rdict
@@ -35,13 +36,14 @@ CATALOG_PATH = os.getenv("CATALOG_PATH", "/code/all_warc_paths.txt.zst")
 # Total: 2 + 8 + 4 = 14 bytes (struct alignment pads to 16)
 VALUE_FORMAT = "!HQI"
 VALUE_SIZE = struct.calcsize(VALUE_FORMAT)
-
-DESCRIPTION = """
+API_VERSION = "0.5.0"
+DESCRIPTION = f"""
 URL lookup tool for [Common Crawl News Dataset](https://data.commoncrawl.org/crawl-data/CC-NEWS/index.html) indexed in RocksDB with a simple API.
 
 Command line client [`ccnget` on github](https://github.com/brian-learns/ccnget).
 
 This server [`cdx_rocks` on github](https://github.com/brian-learns/cdx_rocks).
+v{version("cdx_rocks")} is the version of the server running now.
 
 Built from the [brian-learns/cdx-cc-news Dataset](https://huggingface.co/datasets/brian-learns/cdx-cc-news)
 
@@ -216,13 +218,28 @@ async def lifespan(app: FastAPI):
     db.close()
 
 
-app = FastAPI(title="Common Crawl News Index Gateway", lifespan=lifespan, description=DESCRIPTION, version="0.1.2")
+app = FastAPI(title="Common Crawl News Index Gateway", lifespan=lifespan, description=DESCRIPTION, version=API_VERSION)
+
+api_router = APIRouter(prefix="/cdx-index")
 
 
 @app.get("/", include_in_schema=False)
 async def docs_redirect():
     """Redirect the root URL to the Swagger/OpenAPI docs page."""
     return RedirectResponse(url="/docs")
+
+
+@app.get("/lookup", include_in_schema=False)
+def redirect_old_lookup(request: Request):
+    """Redirect /lookup to /cdx-index/lookup"""
+    # 307 Redirect preserves the request method (GET, POST, etc.)
+    return RedirectResponse(url=f"/cdx-index/lookup?{request.url.query}")
+
+
+@app.get("/extent", include_in_schema=False)
+def redirect_old_extent():
+    """Redirect /extent to /cdx-index/extent"""
+    return RedirectResponse(url="/cdx-index/extent")
 
 
 @app.get("/health", include_in_schema=False)
@@ -238,7 +255,7 @@ async def health():
 
 
 # --- FastAPI Route ---
-@app.get("/lookup", response_model=LookupResponse)
+@api_router.get("/lookup", response_model=LookupResponse)
 async def lookup_endpoint(
     url: Annotated[str, Query(description="URL to look for in the archive")],
     exact: Annotated[bool, Query(description="Exact matching vs prefix matching")] = False,
@@ -269,7 +286,7 @@ async def lookup_endpoint(
     }
 
 
-@app.get("/extent", response_model=ExtentResponse)
+@api_router.get("/extent", response_model=ExtentResponse)
 async def extent_endpoint():
     """show what content is indexed on this server"""
     catalog: dict[int, str] = getattr(app.state, "catalog", {})
@@ -283,6 +300,9 @@ async def extent_endpoint():
         "file_oldest": catalog[first_key],
         "file_newest": catalog[last_key],
     }
+
+
+app.include_router(api_router)
 
 
 if __name__ == "__main__":
