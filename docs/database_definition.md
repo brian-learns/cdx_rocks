@@ -43,7 +43,10 @@ crawl-data/CC-NEWS/2016/08/CC-NEWS-20160831145200-00007.warc.gz
 crawl-data/CC-NEWS/2016/09/CC-NEWS-20160901145200-00008.warc.gz
 crawl-data/CC-NEWS/2016/09/CC-NEWS-20160902145200-00009.warc.gz
 ```
-position of the file in the catalog is packed into the first part of the value struct, followed by byte offset, and then length.
+Position of the file in the catalog is packed into the first part of the value struct, followed by byte offset, and then length.
+
+Entries in the catalog file are lexicographically sorted, which naturally arranges the WARCs in chronological order from oldest to newest.
+
 
 ## RocksDB directory
 A RocksDB directory created with `rocksdict` or containing a `rocksdict-config.json` file.
