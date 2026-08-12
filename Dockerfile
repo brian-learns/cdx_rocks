@@ -36,8 +36,6 @@ RUN groupadd -r fastapi && useradd -r -g fastapi fastapi
 # Copy python packages and the native CLI executable cleanly
 COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /usr/local/bin/fastapi /usr/local/bin/fastapi
-COPY --from=builder /usr/local/bin/cdx-rocks /usr/local/bin/cdx-rocks
-COPY --from=builder /app/app /app/app
 COPY --from=builder /app/src /app/src
 
 RUN mkdir -p /app/data && chown -R fastapi:fastapi /app
@@ -46,4 +44,4 @@ USER fastapi
 VOLUME ["/app/data"]
 EXPOSE 7860
 
-CMD ["fastapi", "run", "app/main.py", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["fastapi", "run", "./src/cdx_rocks/server.py", "--host", "0.0.0.0", "--port", "7860"]

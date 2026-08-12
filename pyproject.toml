@@ -15,7 +15,10 @@ dependencies = [
 ]
 
 [project.scripts]
-cdx-rocks = "cdx_rocks:main"
+cdx-rocks-serve = "cdx_rocks.server:main_serve"
+cdx-rocks-build = "cdx_rocks.build:main"
+cdx-rocks-update = "cdx_rocks.update:main"
+cdx-rocks-shadow = "cdx_rocks.shadow:main"
 
 [build-system]
 requires = ["uv_build>=0.11.33,<0.12.0"]

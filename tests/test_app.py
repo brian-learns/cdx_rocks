@@ -1,16 +1,14 @@
-"""Tests for app/main.py — query_index() and FastAPI /lookup endpoint."""
+"""Tests for cdx_rocks — query_index() and FastAPI /lookup endpoint."""
 
 import struct
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 import surt
 from fastapi.testclient import TestClient
 
-# app.main is already imported by conftest.py so app.state is available.
-from app import main  # noqa: F401
+from cdx_rocks import index, server
 
 # conftest.py mocks zstd.open; grab the original that conftest saved.
 _orig_zstd_open = sys.modules["tests.conftest"]._orig_zstd_open  # type: ignore[attr-defined]
@@ -56,16 +54,16 @@ def db_and_catalog(tmp_path) -> tuple[MockRdict, dict[int, str]]:
 
 def _setup_state(mock_db: MockRdict, catalog: dict[int, str]) -> None:
     """Set app.state.db and app.state.catalog for tests."""
-    main.app.state.db = mock_db
-    main.app.state.catalog = catalog
+    server.app.state.db = mock_db
+    server.app.state.catalog = catalog
 
 
 def _clear_state() -> None:
     """Clear app.state for tests that expect offline DB."""
-    if hasattr(main.app.state, "db"):
-        del main.app.state.db
-    if hasattr(main.app.state, "catalog"):
-        del main.app.state.catalog
+    if hasattr(server.app.state, "db"):
+        del server.app.state.db
+    if hasattr(server.app.state, "catalog"):
+        del server.app.state.catalog
 
 
 def test_query_index_exact_match(db_and_catalog):
@@ -73,7 +71,7 @@ def test_query_index_exact_match(db_and_catalog):
     mock_db, catalog = db_and_catalog
     _setup_state(mock_db, catalog)
     try:
-        surt_prefix, results = main.query_index(main.app, "https://example.com/page", exact_match=True)
+        surt_prefix, results = index.query_index(server.app, "https://example.com/page", exact_match=True)
         assert surt_prefix == "com,example)/page"
         assert len(results) == 2  # default limit is 10, we have 2 entries for this URL
         assert results[0]["timestamp"] == "20260801120000"
@@ -89,7 +87,7 @@ def test_query_index_limit(db_and_catalog):
     mock_db, catalog = db_and_catalog
     _setup_state(mock_db, catalog)
     try:
-        _surt_prefix, results = main.query_index(main.app, "https://example.com/page", exact_match=True, limit=2)
+        _surt_prefix, results = index.query_index(server.app, "https://example.com/page", exact_match=True, limit=2)
         assert len(results) == 2
     finally:
         _clear_state()
@@ -100,8 +98,8 @@ def test_query_index_at_timestamp_seek(db_and_catalog):
     mock_db, catalog = db_and_catalog
     _setup_state(mock_db, catalog)
     try:
-        _surt_prefix, results = main.query_index(
-            main.app, "https://example.com/page", exact_match=True, at="20260802000000"
+        _surt_prefix, results = index.query_index(
+            server.app, "https://example.com/page", exact_match=True, at="20260802000000"
         )
         # Should only return entries >= 20260802000000
         assert len(results) == 1
@@ -115,7 +113,7 @@ def test_query_index_prefix_match(db_and_catalog):
     mock_db, catalog = db_and_catalog
     _setup_state(mock_db, catalog)
     try:
-        _surt_prefix, results = main.query_index(main.app, "https://example.com", exact_match=False)
+        _surt_prefix, results = index.query_index(server.app, "https://example.com", exact_match=False)
         # Prefix "com,example)" matches all entries for example.com
         assert len(results) == 2
     finally:
@@ -127,7 +125,7 @@ def test_query_index_not_found(db_and_catalog):
     mock_db, catalog = db_and_catalog
     _setup_state(mock_db, catalog)
     try:
-        _surt_prefix, results = main.query_index(main.app, "https://nonexistent.io/page", exact_match=True)
+        _surt_prefix, results = index.query_index(server.app, "https://nonexistent.io/page", exact_match=True)
         assert results == []
     finally:
         _clear_state()
@@ -137,7 +135,7 @@ def test_query_index_db_offline():
     """ValueError when app.state.db is not set."""
     _clear_state()
     with pytest.raises(ValueError, match="Database engine is offline"):
-        main.query_index(main.app, "https://example.com")
+        index.query_index(server.app, "https://example.com")
 
 
 def test_lookup_endpoint_exact():
@@ -149,7 +147,7 @@ def test_lookup_endpoint_exact():
     mock_db = MockRdict(db_items)
     _setup_state(mock_db, catalog)
     try:
-        client = TestClient(main.app)
+        client = TestClient(server.app)
         resp = client.get("/cdx-index/lookup", params={"url": "https://example.com/page", "exact": True})
         assert resp.status_code == 200
         body = resp.json()
@@ -168,7 +166,7 @@ def test_lookup_endpoint_not_found():
     mock_db = MockRdict({})
     _setup_state(mock_db, {})
     try:
-        client = TestClient(main.app)
+        client = TestClient(server.app)
         resp = client.get("/cdx-index/lookup", params={"url": "https://missing.io/x"})
         assert resp.status_code == 200
         assert resp.json()["total_results"] == 0
@@ -179,7 +177,7 @@ def test_lookup_endpoint_not_found():
 def test_lookup_endpoint_db_offline():
     """GET /lookup returns 500 when DB is offline."""
     _clear_state()
-    client = TestClient(main.app)
+    client = TestClient(server.app)
     resp = client.get("/cdx-index/lookup", params={"url": "https://example.com"})
     assert resp.status_code == 500
 
@@ -195,7 +193,7 @@ def test_lookup_endpoint_limit_param():
     mock_db = MockRdict(db_items)
     _setup_state(mock_db, catalog)
     try:
-        client = TestClient(main.app)
+        client = TestClient(server.app)
         resp = client.get("/cdx-index/lookup", params={"url": "https://example.com", "exact": False, "limit": 2})
         assert resp.status_code == 200
         assert resp.json()["total_results"] == 2
@@ -213,7 +211,7 @@ def test_lookup_endpoint_at_param():
     mock_db = MockRdict(db_items)
     _setup_state(mock_db, catalog)
     try:
-        client = TestClient(main.app)
+        client = TestClient(server.app)
         resp = client.get(
             "/cdx-index/lookup",
             params={"url": "https://example.com/page", "exact": True, "at": "20260802000000"},
@@ -245,7 +243,7 @@ def test_extent_endpoint(warc_catalog):
     mock_db = MockRdict({})
     _setup_state(mock_db, warc_catalog)
     try:
-        client = TestClient(main.app)
+        client = TestClient(server.app)
         resp = client.get("/cdx-index/extent")
         assert resp.status_code == 200
         body = resp.json()
@@ -261,7 +259,7 @@ def test_extent_endpoint_empty_catalog():
     mock_db = MockRdict({})
     _setup_state(mock_db, {})
     try:
-        client = TestClient(main.app)
+        client = TestClient(server.app)
         resp = client.get("/cdx-index/extent")
         assert resp.status_code == 500
     finally:
@@ -273,7 +271,7 @@ def test_health_endpoint_ready(warc_catalog):
     mock_db = MockRdict({})
     _setup_state(mock_db, warc_catalog)
     try:
-        client = TestClient(main.app)
+        client = TestClient(server.app)
         resp = client.get("/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
@@ -284,7 +282,7 @@ def test_health_endpoint_ready(warc_catalog):
 def test_health_endpoint_not_ready():
     """GET /health returns 503 when catalog or DB are not loaded."""
     _clear_state()
-    client = TestClient(main.app)
+    client = TestClient(server.app)
     resp = client.get("/health")
     assert resp.status_code == 503
     assert "not ready" in resp.json()["detail"].lower()

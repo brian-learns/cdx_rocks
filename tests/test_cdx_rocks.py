@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cdx_rocks import setup_shadow
+from cdx_rocks.shadow import setup_shadow
 
 CONFIG_FILENAME = "rocksdict-config.json"
 

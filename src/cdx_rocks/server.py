@@ -1,20 +1,23 @@
+"""FastAPI server for cdx-rocks CDX index lookup."""
+
 import logging
 import os
-import struct
 import tempfile
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, override
 
-import surt
 import zstandard as zstd
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from rocksdict import AccessType, DBCompressionType, Options, Rdict
 
-from cdx_rocks import get_rocks_dir
+from cdx_rocks.config import resolve_catalog_path, resolve_rocks_dir, resolve_struct_format
+from cdx_rocks.index import query_index
+from cdx_rocks.schema import validate_struct_format as _validate_struct_format
+from cdx_rocks.shadow import get_rocks_dir
 
 # --- logging ---
 logger = logging.getLogger(__name__)
@@ -24,18 +27,17 @@ logging.basicConfig(
 )
 access_logger = logging.getLogger("uvicorn.access")
 
-# --- Storage Paths ---
-ROCKSDB_DIR = get_rocks_dir(os.getenv("CDX_ROCKS", "/data"), tempfile.mkdtemp(prefix="cdx_", suffix="_rocks"))
-CATALOG_PATH = os.getenv("CATALOG_PATH", "/code/all_warc_paths.txt.zst")
+# --- Storage Paths (manifest-first, env-var fallback) ---
+_STRUCT_FORMAT = resolve_struct_format()
+if not _validate_struct_format(_STRUCT_FORMAT):
+    raise RuntimeError(f"Invalid struct_format from manifest/env: {_STRUCT_FORMAT!r}")
 
-# --- RocksDB value format ---
-# Each value is a 16-byte big-endian struct:
-#   H (uint16) — WARC file ID (index into the catalog)
-#   Q (uint64) — Byte offset within the WARC file
-#   I (uint32) — Record length in bytes
-# Total: 2 + 8 + 4 = 14 bytes (struct alignment pads to 16)
-VALUE_FORMAT = "!HQI"
-VALUE_SIZE = struct.calcsize(VALUE_FORMAT)
+ROCKSDB_DIR = get_rocks_dir(
+    resolve_rocks_dir(),
+    tempfile.mkdtemp(prefix="cdx_", suffix="_rocks"),
+)
+CATALOG_PATH = resolve_catalog_path()
+
 API_VERSION = "0.5.0"
 DESCRIPTION = f"""
 URL lookup tool for [Common Crawl News Dataset](https://data.commoncrawl.org/crawl-data/CC-NEWS/index.html) indexed in RocksDB with a simple API.
@@ -106,84 +108,6 @@ class HealthCheckFilter(logging.Filter):
 
 
 access_logger.addFilter(HealthCheckFilter())
-
-
-# --- Core Index Query Engine ---
-def query_index(app: FastAPI, url: str, exact_match: bool = False, limit: int = 10, at: str | None = None):
-    """Core lookup engine:
-
-    - exact_match=True + at: Seeks directly in RocksDB to the first record >= 'at' timestamp.
-    - exact_match=False + at: Scans prefix entries and returns closest matches sorted by proximity to 'at'.
-    """
-    db: Rdict | None = getattr(app.state, "db", None)
-    if db is None:
-        raise ValueError("Database engine is offline.")
-
-    catalog: dict[int, str] = getattr(app.state, "catalog", {})
-
-    surt_str = surt.surt(url)
-
-    # Determine prefix and database seeking key
-    if exact_match:
-        prefix_bytes = f"{surt_str}\x00".encode("utf-8")
-        if at:
-            # Timestamp seek: Jump straight to captures at/after the 'at' timestamp
-            from_key = f"{surt_str}\x00{at}".encode("utf-8")
-        else:
-            from_key = prefix_bytes
-    else:
-        prefix_bytes = surt_str.encode("utf-8")
-        from_key = prefix_bytes
-
-    results: list[dict[str, str | int]] = []
-
-    for key, value in db.items(from_key=from_key):
-        if not isinstance(key, bytes):
-            continue
-
-        if not key.startswith(prefix_bytes):
-            break
-
-        decoded_key = key.decode("utf-8", errors="replace")
-        if "\x00" in decoded_key:
-            surt_key, timestamp = decoded_key.rsplit("\x00", 1)
-        else:
-            surt_key, timestamp = decoded_key, ""
-
-        absolute_id, offset, length = struct.unpack(VALUE_FORMAT, value)
-        warc_path = catalog.get(absolute_id, "PATH_NOT_FOUND")
-
-        results.append(
-            {
-                "surt_key": surt_key,
-                "timestamp": timestamp,
-                "warc_path": warc_path,
-                "offset": offset,
-                "length": length,
-            }
-        )
-
-        # Early exit for exact seek or standard non-'at' queries
-        if (exact_match or at is None) and len(results) >= limit:
-            break
-
-    # For partial prefix match with 'at', calculate distance and sort by closest timestamp
-    if not exact_match and at and results:
-        target_ts = at.ljust(14, "0") if len(at) < 14 else at[:14]
-
-        with suppress(ValueError):
-            target_num = int(target_ts)
-            results.sort(
-                key=lambda r: (
-                    abs(int(r["timestamp"]) - target_num)
-                    if isinstance(r["timestamp"], str) and r["timestamp"].isdigit()
-                    else float("inf")
-                )
-            )
-
-        results = results[:limit]
-
-    return surt_str, results
 
 
 # --- FastAPI Startup/Shutdown Lifespan ---
@@ -305,7 +229,12 @@ async def extent_endpoint():
 app.include_router(api_router)
 
 
-if __name__ == "__main__":
+def main_serve() -> None:
+    """Entry point for the cdx-rocks-serve CLI command."""
     import uvicorn
 
-    uvicorn.run("main:app", host="127.0.0.1", port=7860)
+    uvicorn.run("cdx_rocks.server:app", host="127.0.0.1", port=7860)
+
+
+if __name__ == "__main__":
+    main_serve()

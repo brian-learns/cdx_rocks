@@ -20,23 +20,23 @@ all_warc_paths.txt.zst:
 
 check:
 	@echo "\n— [An extremely fast Python linter and code formatter](https://docs.astral.sh/ruff/)"
-	uv run ruff check app/ src/ --fix
-	uv run ruff format app/ src/ --check
+	uv run ruff check src/ --fix
+	uv run ruff format src/ --check
 
 	@echo "\n— [AST based security scanner](https://bandit.readthedocs.io/en/latest/)"
-	uv run bandit -c pyproject.toml -r app/ src/
+	uv run bandit -c pyproject.toml -r src/
 
 	@echo "\n— [Find dead Python code](https://github.com/jendrikseipp/vulture)"
-	uv run vulture app/ src/ --min-confidence 80
+	uv run vulture src/ --min-confidence 80
 
 	@echo "\n— [A tool for refurbishing and modernizing Python codebases](https://github.com/dosisod/refurb)"
-	uv run refurb app/ src/
+	uv run refurb src/
 
 	@echo "\n— [An extremely fast Python type checker and language server]( https://docs.astral.sh/ty/)"
-	uv run ty check app/ src/
+	uv run ty check src/
 
 	@echo "\n— [Interrogate a codebase for docstring coverage](https://interrogate.readthedocs.io/en/latest/)"
-	uv run interrogate app/ src/
+	uv run interrogate src/
 
 test: check
 	uv run pytest -v --durations=5
