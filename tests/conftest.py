@@ -1,5 +1,6 @@
 """Conftest: isolate cdx_rocks.server imports from real filesystem state."""
 
+import json
 import os
 import sys
 import atexit
@@ -12,8 +13,18 @@ import zstandard as zstd
 _tmpdir = tempfile.mkdtemp(prefix="cdx_rocks_test_")
 (Path(_tmpdir) / "rocks").mkdir(parents=True, exist_ok=True)
 
+# Write a minimal manifest so config.py resolves paths at import time
+manifest_data = [
+    "cdx-rocks",
+    {
+        "catalog": "all_warc_paths.txt.zst",
+        "db": "rocks/",
+        "struct_format": "!HQI",
+    },
+]
+(Path(_tmpdir) / "cdx-rocks.json").write_text(json.dumps(manifest_data) + "\n")
+
 os.environ["CDX_ROCKS"] = _tmpdir
-os.environ["CATALOG_PATH"] = "/dev/null"
 
 # Mock zstandard.open so lifespan startup doesn't try to read a real catalog.
 _orig_zstd_open = zstd.open

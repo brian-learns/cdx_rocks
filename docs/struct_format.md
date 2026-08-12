@@ -1,4 +1,4 @@
-return to [`cdx-rocks` database definition](./database_definition)
+return to [`cdx-rocks` database definition](./database_definition.md)
 
 # struct_format
 

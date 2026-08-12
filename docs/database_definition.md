@@ -4,7 +4,7 @@ Goal: provide a fast key/value lookup for [CDXj indexes of WARC files](https://s
 
 A `cdx-rocks` database consists of a directory or tar file containing three primary artifacts.
 
- 1. `cdx-rocks.json` file specifying the catalog file, rocks db directory, and [`struct_format`](./struct_format).
+ 1. `cdx-rocks.json` file specifying the catalog file, rocks db directory, and [`struct_format`](./struct_format.md).
  2. A catalog file
  3. a RocksDB directory
  4. optional `extent.json` file with the same contents as /extent API endpoint

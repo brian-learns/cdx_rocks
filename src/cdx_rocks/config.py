@@ -1,4 +1,7 @@
-"""Configuration via cdx-rocks.json manifest with env-var fallbacks.
+"""Configuration via cdx-rocks.json manifest.
+
+The only environment variable is ``CDX_ROCKS``, which must point to a directory
+containing ``cdx-rocks.json`` (or directly to the JSON file).
 
 Manifest format (JSON array):
 
@@ -8,8 +11,8 @@ Manifest format (JSON array):
         "struct_format": "!HQI"
     }]
 
-The manifest file is searched for at ``$CDX_ROCKS/cdx-rocks.json`` or
-``$CDX_ROCKS`` itself if it points directly to the JSON file.
+All three fields are required. If the manifest is missing or malformed,
+the server refuses to start with a clear error.
 """
 
 from __future__ import annotations
@@ -20,10 +23,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from cdx_rocks.catalog import DEFAULT_CATALOG_PATH
 from cdx_rocks.schema import validate_struct_format
-
-DEFAULT_STRUCT_FORMAT = "!HQI"
 
 # --- logging ---
 logger = logging.getLogger(__name__)
@@ -33,43 +33,43 @@ logging.basicConfig(
 )
 
 
+class ManifestError(RuntimeError):
+    """Raised when the manifest is missing, empty, or malformed."""
+
+
 def load_manifest(path: str | Path) -> dict[str, Any]:
     """Read and validate a ``cdx-rocks.json`` manifest file.
 
-    Returns the inner dict with keys ``catalog``, ``db``, and optionally
-    ``struct_format``.
+    Returns the inner dict with keys ``catalog``, ``db``, and ``struct_format``.
 
     Raises:
-        FileNotFoundError: If the file does not exist.
-        ValueError: If the manifest is malformed or contains invalid values.
+        ManifestError: If the file is missing, empty, or malformed.
     """
     path = Path(path)
     if not path.is_file():
-        raise FileNotFoundError(f"Manifest not found: {path}")
+        raise ManifestError(f"Manifest not found: {path}")
 
     raw = json.loads(path.read_text(encoding="utf-8"))
 
     # Top-level must be [identifier, dict]
     if not isinstance(raw, list) or len(raw) != 2:
-        raise ValueError(f"Manifest must be [identifier, config], got {type(raw).__name__} with {len(raw)} elements")
+        raise ManifestError(f"Manifest must be [identifier, config], got {type(raw).__name__} with {len(raw)} elements")
 
     tag, cfg = raw
     if tag != "cdx-rocks":
-        raise ValueError(f"Expected tag 'cdx-rocks', got {tag!r}")
+        raise ManifestError(f"Expected tag 'cdx-rocks', got {tag!r}")
 
     if not isinstance(cfg, dict):
-        raise ValueError(f"Config must be a dict, got {type(cfg).__name__}")
+        raise ManifestError(f"Config must be a dict, got {type(cfg).__name__}")
 
-    if "catalog" not in cfg:
-        raise ValueError("Manifest missing required key 'catalog'")
-    if "db" not in cfg:
-        raise ValueError("Manifest missing required key 'db'")
+    for key in ("catalog", "db", "struct_format"):
+        if key not in cfg:
+            raise ManifestError(f"Manifest missing required key '{key}'")
 
-    # Validate struct_format if present
-    if "struct_format" in cfg:
-        fmt = cfg["struct_format"]
-        if not validate_struct_format(fmt):
-            raise ValueError(f"Invalid struct_format in manifest: {fmt!r}")
+    # Validate struct_format
+    fmt = cfg["struct_format"]
+    if not validate_struct_format(fmt):
+        raise ManifestError(f"Invalid struct_format in manifest: {fmt!r}")
 
     # Resolve relative paths against the manifest's parent directory
     manifest_dir = path.parent
@@ -78,7 +78,8 @@ def load_manifest(path: str | Path) -> dict[str, Any]:
         result["catalog"] = str(manifest_dir / result["catalog"])
     if not Path(result["db"]).is_absolute():
         result["db"] = str(manifest_dir / result["db"])
-    logger.info(result)
+
+    logger.info("Loaded manifest: %s", result)
     return result
 
 
@@ -105,61 +106,63 @@ def _find_manifest(cdx_rocks_env: str | None) -> Path | None:
 
 
 def resolve_rocks_dir(cdx_rocks_env: str | None = None) -> str:
-    """Return the RocksDB directory path.
+    """Return the RocksDB directory path from the manifest.
 
-    Looks for a manifest under ``$CDX_ROCKS`` first, then falls back to the
-    environment variable value directly (the directory itself).
+    Requires ``$CDX_ROCKS`` (or explicit argument) pointing to a manifest.
+    Raises ``ManifestError`` if the manifest is missing or invalid.
     """
     if cdx_rocks_env is None:
         cdx_rocks_env = os.environ.get("CDX_ROCKS")
 
+    if not cdx_rocks_env:
+        raise ManifestError("CDX_ROCKS environment variable is not set")
+
     manifest = _find_manifest(cdx_rocks_env)
-    if manifest is not None:
-        cfg = load_manifest(manifest)
-        return cfg["db"]
+    if manifest is None:
+        raise ManifestError(
+            f"No cdx-rocks.json manifest found at {Path(cdx_rocks_env)} or {Path(cdx_rocks_env) / 'cdx-rocks.json'}"
+        )
 
-    # Fallback: use CDX_ROCKS value as the DB directory
-    if cdx_rocks_env:
-        return cdx_rocks_env
-
-    return "/data"
+    return load_manifest(manifest)["db"]
 
 
 def resolve_catalog_path(cdx_rocks_env: str | None = None) -> str:
-    """Return the catalog file path.
+    """Return the catalog file path from the manifest.
 
-    Looks for a manifest under ``$CDX_ROCKS`` first, then falls back to
-    ``$CATALOG_PATH``, then to the compiled-in default.
+    Requires ``$CDX_ROCKS`` (or explicit argument) pointing to a manifest.
+    Raises ``ManifestError`` if the manifest is missing or invalid.
     """
     if cdx_rocks_env is None:
         cdx_rocks_env = os.environ.get("CDX_ROCKS")
 
+    if not cdx_rocks_env:
+        raise ManifestError("CDX_ROCKS environment variable is not set")
+
     manifest = _find_manifest(cdx_rocks_env)
-    if manifest is not None:
-        cfg = load_manifest(manifest)
-        return cfg["catalog"]
+    if manifest is None:
+        raise ManifestError(
+            f"No cdx-rocks.json manifest found at {Path(cdx_rocks_env)} or {Path(cdx_rocks_env) / 'cdx-rocks.json'}"
+        )
 
-    # Fallback: explicit env var
-    catalog_env = os.environ.get("CATALOG_PATH")
-    if catalog_env:
-        return catalog_env
-
-    # Default
-    return DEFAULT_CATALOG_PATH
+    return load_manifest(manifest)["catalog"]
 
 
 def resolve_struct_format(cdx_rocks_env: str | None = None) -> str:
-    """Return the struct format string.
+    """Return the struct format string from the manifest.
 
-    Looks for a manifest under ``$CDX_ROCKS`` first, then falls back to the
-    default ``!HQI``.
+    Requires ``$CDX_ROCKS`` (or explicit argument) pointing to a manifest.
+    Raises ``ManifestError`` if the manifest is missing or invalid.
     """
     if cdx_rocks_env is None:
         cdx_rocks_env = os.environ.get("CDX_ROCKS")
 
-    manifest = _find_manifest(cdx_rocks_env)
-    if manifest is not None:
-        cfg = load_manifest(manifest)
-        return cfg.get("struct_format", DEFAULT_STRUCT_FORMAT)
+    if not cdx_rocks_env:
+        raise ManifestError("CDX_ROCKS environment variable is not set")
 
-    return DEFAULT_STRUCT_FORMAT
+    manifest = _find_manifest(cdx_rocks_env)
+    if manifest is None:
+        raise ManifestError(
+            f"No cdx-rocks.json manifest found at {Path(cdx_rocks_env)} or {Path(cdx_rocks_env) / 'cdx-rocks.json'}"
+        )
+
+    return load_manifest(manifest)["struct_format"]

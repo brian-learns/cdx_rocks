@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from cdx_rocks.config import (
-    DEFAULT_STRUCT_FORMAT,
+    ManifestError,
     load_manifest,
     resolve_catalog_path,
     resolve_rocks_dir,
@@ -33,12 +33,14 @@ class TestLoadManifest:
         m = _write_manifest(tmp_path, {
             "catalog": "catalog.txt",
             "db": "rocks/",
+            "struct_format": "!HQI",
         })
         cfg = load_manifest(m)
         assert cfg["catalog"] == str(tmp_path / "catalog.txt")
         assert cfg["db"] == str(tmp_path / "rocks")
+        assert cfg["struct_format"] == "!HQI"
 
-    def test_valid_with_struct_format(self, tmp_path: Path):
+    def test_valid_with_iqi(self, tmp_path: Path):
         m = _write_manifest(tmp_path, {
             "catalog": "cat.zst",
             "db": "db/",
@@ -48,29 +50,34 @@ class TestLoadManifest:
         assert cfg["struct_format"] == "!IQI"
 
     def test_rejects_missing_file(self):
-        with pytest.raises(FileNotFoundError, match="Manifest not found"):
+        with pytest.raises(ManifestError, match="Manifest not found"):
             load_manifest("/nonexistent/cdx-rocks.json")
 
     def test_rejects_wrong_tag(self, tmp_path: Path):
         path = tmp_path / "bad.json"
         path.write_text(json.dumps(["wrong-tag", {}]))
-        with pytest.raises(ValueError, match="Expected tag 'cdx-rocks'"):
+        with pytest.raises(ManifestError, match="Expected tag 'cdx-rocks'"):
             load_manifest(path)
 
     def test_rejects_not_a_list(self, tmp_path: Path):
         path = tmp_path / "bad.json"
         path.write_text(json.dumps({"catalog": "x"}))
-        with pytest.raises(ValueError, match="Manifest must be"):
+        with pytest.raises(ManifestError, match="Manifest must be"):
             load_manifest(path)
 
     def test_rejects_missing_catalog(self, tmp_path: Path):
-        m = _write_manifest(tmp_path, {"db": "rocks/"})
-        with pytest.raises(ValueError, match="missing required key 'catalog'"):
+        m = _write_manifest(tmp_path, {"db": "rocks/", "struct_format": "!HQI"})
+        with pytest.raises(ManifestError, match="missing required key 'catalog'"):
             load_manifest(m)
 
     def test_rejects_missing_db(self, tmp_path: Path):
-        m = _write_manifest(tmp_path, {"catalog": "cat.txt"})
-        with pytest.raises(ValueError, match="missing required key 'db'"):
+        m = _write_manifest(tmp_path, {"catalog": "cat.txt", "struct_format": "!HQI"})
+        with pytest.raises(ManifestError, match="missing required key 'db'"):
+            load_manifest(m)
+
+    def test_rejects_missing_struct_format(self, tmp_path: Path):
+        m = _write_manifest(tmp_path, {"catalog": "cat.txt", "db": "rocks/"})
+        with pytest.raises(ManifestError, match="missing required key 'struct_format'"):
             load_manifest(m)
 
     def test_rejects_invalid_struct_format(self, tmp_path: Path):
@@ -79,13 +86,14 @@ class TestLoadManifest:
             "db": "rocks/",
             "struct_format": "!hqi",
         })
-        with pytest.raises(ValueError, match="Invalid struct_format"):
+        with pytest.raises(ManifestError, match="Invalid struct_format"):
             load_manifest(m)
 
     def test_absolute_paths_passthrough(self, tmp_path: Path):
         m = _write_manifest(tmp_path, {
             "catalog": "/abs/catalog.txt",
             "db": "/abs/db/",
+            "struct_format": "!HQI",
         })
         cfg = load_manifest(m)
         assert cfg["catalog"] == "/abs/catalog.txt"
@@ -93,44 +101,25 @@ class TestLoadManifest:
 
 
 class TestResolveFunctions:
-    """resolve_*() functions with manifest and env-var fallback."""
+    """resolve_*() functions require a manifest — no fallbacks."""
 
     def test_resolve_rocks_dir_from_manifest(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         _write_manifest(tmp_path, {
             "catalog": "cat.txt",
             "db": "mydb/",
+            "struct_format": "!HQI",
         })
         monkeypatch.setenv("CDX_ROCKS", str(tmp_path))
         assert resolve_rocks_dir() == str(tmp_path / "mydb")
-
-    def test_resolve_rocks_dir_env_fallback(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("CDX_ROCKS", "/direct/db")
-        # No manifest at /direct/db, so it falls back to the env value
-        assert resolve_rocks_dir() == "/direct/db"
-
-    def test_resolve_rocks_dir_default(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.delenv("CDX_ROCKS", raising=False)
-        assert resolve_rocks_dir() == "/data"
 
     def test_resolve_catalog_from_manifest(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         _write_manifest(tmp_path, {
             "catalog": "my_catalog.zst",
             "db": "rocks/",
+            "struct_format": "!HQI",
         })
         monkeypatch.setenv("CDX_ROCKS", str(tmp_path))
         assert resolve_catalog_path() == str(tmp_path / "my_catalog.zst")
-
-    def test_resolve_catalog_env_fallback(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.delenv("CDX_ROCKS", raising=False)
-        monkeypatch.setenv("CATALOG_PATH", "/env/catalog.txt")
-        assert resolve_catalog_path() == "/env/catalog.txt"
-
-    def test_resolve_catalog_default(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.delenv("CDX_ROCKS", raising=False)
-        monkeypatch.delenv("CATALOG_PATH", raising=False)
-        # Falls back to DEFAULT_CATALOG_PATH from catalog.py
-        from cdx_rocks.catalog import DEFAULT_CATALOG_PATH
-        assert resolve_catalog_path() == DEFAULT_CATALOG_PATH
 
     def test_resolve_struct_format_from_manifest(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         _write_manifest(tmp_path, {
@@ -141,10 +130,22 @@ class TestResolveFunctions:
         monkeypatch.setenv("CDX_ROCKS", str(tmp_path))
         assert resolve_struct_format() == "!IIQ"
 
-    def test_resolve_struct_format_default(self, monkeypatch: pytest.MonkeyPatch):
+    def test_raises_when_cdx_rocks_not_set(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("CDX_ROCKS", raising=False)
-        assert resolve_struct_format() == DEFAULT_STRUCT_FORMAT
-        assert DEFAULT_STRUCT_FORMAT == "!HQI"
+        with pytest.raises(ManifestError, match="CDX_ROCKS environment variable is not set"):
+            resolve_rocks_dir()
+
+    def test_raises_when_manifest_not_found(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("CDX_ROCKS", "/nonexistent/path")
+        with pytest.raises(ManifestError, match="No cdx-rocks.json manifest found"):
+            resolve_rocks_dir()
+
+    def test_raises_when_manifest_malformed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        bad = tmp_path / "cdx-rocks.json"
+        bad.write_text('{"not": "manifest"}')
+        monkeypatch.setenv("CDX_ROCKS", str(tmp_path))
+        with pytest.raises(ManifestError):
+            resolve_rocks_dir()
 
     def test_resolve_with_explicit_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """resolve_*() accepts an explicit path argument, ignoring env."""
@@ -164,6 +165,7 @@ class TestResolveFunctions:
         manifest.write_text(json.dumps(["cdx-rocks", {
             "catalog": "direct.txt",
             "db": "directdb/",
+            "struct_format": "!HQI",
         }]))
         monkeypatch.setenv("CDX_ROCKS", str(manifest))
         assert resolve_rocks_dir() == str(tmp_path / "directdb")

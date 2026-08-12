@@ -133,6 +133,41 @@ def update_index(
 
     db.close()
 
+    # Write extent.json from the catalog
+    _write_extent(catalog_path)
+
+
+def _write_extent(catalog_path: str) -> None:
+    """Write extent.json from the catalog file."""
+    dctx = zstd.ZstdDecompressor()
+    first_path: str | None = None
+    last_path: str | None = None
+    count = 0
+
+    with open(catalog_path, "rb") as fh:
+        with dctx.stream_reader(fh) as reader:
+            text_stream = io.TextIOWrapper(reader, encoding="utf-8")
+            for line in text_stream:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                count += 1
+                if first_path is None:
+                    first_path = stripped
+                last_path = stripped
+
+    extent = {
+        "file_extent": count,
+        "file_oldest": first_path or "",
+        "file_newest": last_path or "",
+    }
+
+    # Find extent.json alongside the catalog
+    catalog_dir = Path(catalog_path).parent
+    extent_path = catalog_dir / "extent.json"
+    extent_path.write_text(json.dumps(extent, indent=2) + "\n")
+    logger.info("Wrote %s (%d files).", extent_path, count)
+
 
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point for cdx-rocks-update."""
@@ -144,7 +179,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--catalog",
         required=True,
-        help="Path to all_warc_paths.txt.zst",
+        help="Path to current all_warc_paths.txt.zst",
     )
     parser.add_argument(
         "--db-dir",

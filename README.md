@@ -50,7 +50,7 @@ cdx-rocks-build \
     --cdxj-dir /path/to/cdxj_files \
     --catalog /path/to/all_warc_paths.txt.zst \
     --output-dir /path/to/index \
-    --struct-format !HQI
+    --struct-format '!HQI'
 ```
 
 Writes to the output directory:
