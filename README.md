@@ -6,11 +6,7 @@ FastAPI server backed by RocksDB for looking up CDX index records from the Commo
 
 ## Download Data
 
-Downloads over 75G of RocksDB index files and master catalog file of WARC paths.
-
-```bash
-make loaddata
-```
+This is broken right now, but the builder scripts are in this project now.
 
 ## Run the server
 
@@ -25,15 +21,6 @@ docker compose up --build
 # get on the running instance
 docker compose exec web /bin/sh
 ```
-
-## Local Setup
-
-Set these environment variables (manifest in `cdx-rocks.json` takes priority if present):
-
-| Variable | Description |
-|----------|-------------|
-| `CDX_ROCKS` | Path to the `cdx-index` database directory |
-| `CATALOG_PATH` | Path to the master list of WARC files |
 
 ## CLI Commands
 
