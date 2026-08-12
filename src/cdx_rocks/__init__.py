@@ -3,7 +3,6 @@
 __version__ = "0.2.0"
 
 from cdx_rocks.build import build_index, load_catalog
-from cdx_rocks.catalog import DEFAULT_CATALOG_PATH
 from cdx_rocks.config import (
     load_manifest,
     resolve_catalog_path,
@@ -16,7 +15,6 @@ from cdx_rocks.shadow import get_rocks_dir, setup_shadow
 from cdx_rocks.update import update_index
 
 __all__ = [
-    "DEFAULT_CATALOG_PATH",
     "VALUE_FORMAT",
     "VALUE_SIZE",
     "__version__",
