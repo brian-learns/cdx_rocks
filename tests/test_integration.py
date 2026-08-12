@@ -205,8 +205,13 @@ def test_update_adds_records(tmp_path: Path):
             text_writer.write(f"{surt_str} 20260301100000 {meta}\n")
             text_writer.flush()
 
-    # Update the index
-    update_index(str(cdxj_file2), str(output_dir / "rocks"), str(test_catalog), struct_format="!HQI")
+    # Update the index — reads manifest from output_dir, copies catalog, writes extent
+    update_index(str(cdxj_file2), str(test_catalog), str(output_dir))
+
+    # Verify extent.json was refreshed
+    extent = json.loads((output_dir / "extent.json").read_text())
+    assert extent["file_extent"] == 10
+    assert extent["file_oldest"].startswith("crawl-data/CC-NEWS/2016/08/")
 
     # Open and verify both old and new records exist
     opts = Options(raw_mode=True)

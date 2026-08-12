@@ -1,10 +1,13 @@
 """Update an existing cdx-rocks index with a new CDXJ file.
 
-Adds records from a single CDXJ file into an existing RocksDB database.
+Adds records from a single CDXJ file into an existing RocksDB database,
+replaces the catalog, and refreshes extent.json.
 
 Usage
 -----
-    cdx-rocks-update /path/to/cc-news_2026_08.cdxj.zst --catalog all_warc_paths.txt.zst --db-dir /path/to/index/rocks
+    cdx-rocks-update /path/to/cc-news_2026_09.cdxj.zst \
+        --catalog /path/to/updated_all_warc_paths.txt.zst \
+        --output-dir /path/to/index
 """
 
 from __future__ import annotations
@@ -14,12 +17,14 @@ import io
 import json
 import logging
 import os
+import shutil
 import sys
 from pathlib import Path
 
 import zstandard as zstd
 from rocksdict import DBCompactionStyle, DBCompressionType, Options, Rdict, WriteBatch
 
+from cdx_rocks.config import ManifestError, load_manifest
 from cdx_rocks.schema import safe_pack, validate_struct_format
 
 logger = logging.getLogger(__name__)
@@ -28,7 +33,6 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 
-DEFAULT_STRUCT_FORMAT = "!HQI"
 BATCH_SIZE = 100_000
 
 
@@ -52,19 +56,66 @@ def load_catalog(catalog_path: str) -> dict[str, int]:
     return name_to_id
 
 
+def _write_extent(catalog_path: str, output_dir: Path) -> None:
+    """Write extent.json from the catalog file into output_dir."""
+    dctx = zstd.ZstdDecompressor()
+    first_path: str | None = None
+    last_path: str | None = None
+    count = 0
+
+    with open(catalog_path, "rb") as fh:
+        with dctx.stream_reader(fh) as reader:
+            text_stream = io.TextIOWrapper(reader, encoding="utf-8")
+            for line in text_stream:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                count += 1
+                if first_path is None:
+                    first_path = stripped
+                last_path = stripped
+
+    extent = {
+        "file_extent": count,
+        "file_oldest": first_path or "",
+        "file_newest": last_path or "",
+    }
+
+    extent_path = output_dir / "extent.json"
+    extent_path.write_text(json.dumps(extent, indent=2) + "\n")
+    logger.info("Wrote %s (%d files).", extent_path, count)
+
+
 def update_index(
     cdxj_file: str,
-    db_dir: str,
     catalog_path: str,
-    struct_format: str = DEFAULT_STRUCT_FORMAT,
+    output_dir: str,
 ) -> None:
-    """Add records from *cdxj_file* into the RocksDB at *db_dir*.
+    """Add records from *cdxj_file* into the existing index at *output_dir*.
 
-    Opens the existing database and merges new entries. Duplicate keys
-    (same SURT + timestamp) are silently overwritten.
+    Reads the manifest from *output_dir* to get the DB path and struct format.
+    Copies the updated catalog into *output_dir* and refreshes extent.json.
     """
+    out = Path(output_dir)
+
+    # Load manifest to get DB directory and struct format
+    manifest_path = out / "cdx-rocks.json"
+    if not manifest_path.is_file():
+        raise ManifestError(
+            f"No cdx-rocks.json manifest found in {output_dir}. "
+            "Run cdx-rocks-build first to create the initial index."
+        )
+
+    cfg = load_manifest(manifest_path)
+    db_dir = Path(cfg["db"])
+    struct_format = cfg["struct_format"]
+
+    # Validate struct format
     if not validate_struct_format(struct_format):
-        raise ValueError(f"Invalid struct format: {struct_format!r}")
+        raise ValueError(f"Invalid struct format in manifest: {struct_format!r}")
+
+    logger.info("Struct format: %s", struct_format)
+    logger.info("DB directory: %s", db_dir)
 
     name_to_id = load_catalog(catalog_path)
 
@@ -75,7 +126,7 @@ def update_index(
     opts.set_max_write_buffer_number(6)
 
     logger.info("Opening RocksDB at %s", db_dir)
-    db = Rdict(db_dir, options=opts)
+    db = Rdict(str(db_dir), options=opts)
 
     dctx = zstd.ZstdDecompressor()
     record_count = 0
@@ -133,45 +184,20 @@ def update_index(
 
     db.close()
 
-    # Write extent.json from the catalog
-    _write_extent(catalog_path)
+    # Copy the updated catalog into output_dir
+    catalog_dest = out / "all_warc_paths.txt.zst"
+    shutil.copy2(catalog_path, str(catalog_dest))
+    logger.info("Copied catalog to %s", catalog_dest)
 
-
-def _write_extent(catalog_path: str) -> None:
-    """Write extent.json from the catalog file."""
-    dctx = zstd.ZstdDecompressor()
-    first_path: str | None = None
-    last_path: str | None = None
-    count = 0
-
-    with open(catalog_path, "rb") as fh:
-        with dctx.stream_reader(fh) as reader:
-            text_stream = io.TextIOWrapper(reader, encoding="utf-8")
-            for line in text_stream:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                count += 1
-                if first_path is None:
-                    first_path = stripped
-                last_path = stripped
-
-    extent = {
-        "file_extent": count,
-        "file_oldest": first_path or "",
-        "file_newest": last_path or "",
-    }
-
-    # Find extent.json alongside the catalog
-    catalog_dir = Path(catalog_path).parent
-    extent_path = catalog_dir / "extent.json"
-    extent_path.write_text(json.dumps(extent, indent=2) + "\n")
-    logger.info("Wrote %s (%d files).", extent_path, count)
+    # Write extent.json from the new catalog
+    _write_extent(str(catalog_dest), out)
 
 
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point for cdx-rocks-update."""
-    parser = argparse.ArgumentParser(description="Add a CDXJ file to an existing cdx-rocks index.")
+    parser = argparse.ArgumentParser(
+        description="Add a CDXJ file to an existing cdx-rocks index."
+    )
     parser.add_argument(
         "cdxj_file",
         help="Path to a .cdxj.zst file",
@@ -179,17 +205,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--catalog",
         required=True,
-        help="Path to current all_warc_paths.txt.zst",
+        help="Path to the updated all_warc_paths.txt.zst (includes new month's WARC files)",
     )
     parser.add_argument(
-        "--db-dir",
+        "--output-dir",
         required=True,
-        help="Path to the RocksDB directory",
-    )
-    parser.add_argument(
-        "--struct-format",
-        default=DEFAULT_STRUCT_FORMAT,
-        help=f"Struct format string (default: {DEFAULT_STRUCT_FORMAT})",
+        help="Path to the existing index directory (contains cdx-rocks.json, rocks/, etc.)",
     )
 
     args = parser.parse_args(argv)
@@ -197,8 +218,12 @@ def main(argv: list[str] | None = None) -> None:
         logger.error("Input file %s not found.", args.cdxj_file)
         sys.exit(1)
 
+    if not Path(args.catalog).exists():
+        logger.error("Catalog file %s not found.", args.catalog)
+        sys.exit(1)
+
     try:
-        update_index(args.cdxj_file, args.db_dir, args.catalog, args.struct_format)
+        update_index(args.cdxj_file, args.catalog, args.output_dir)
     except Exception as e:
         logger.error("Update failed: %s", e)
         sys.exit(1)

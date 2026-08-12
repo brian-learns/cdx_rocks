@@ -6,7 +6,12 @@ FastAPI server backed by RocksDB for looking up CDX index records from the Commo
 
 ## Download Data
 
-This is broken right now, but the builder scripts are in this project now.
+```
+# small test index that contains http://example.com/ record
+uvx hf sync hf://buckets/brian-learns/cdx-rocks-demo rocksdb_index
+# full index
+https://huggingface.co/buckets/brian-learns/cdx-rocks-monthly
+```
 
 ## Run the server
 
@@ -39,7 +44,7 @@ Start the FastAPI lookup server (default: `127.0.0.1:7860`).
 cdx-rocks-serve
 ```
 
-Server reads config from `$CDX_ROCKS/cdx-rocks.json` manifest (if present), then falls back to environment variables.
+Server reads config from `$CDX_ROCKS/cdx-rocks.json` manifest 
 
 ### `cdx-rocks-build`
 
@@ -61,13 +66,17 @@ Writes to the output directory:
 
 ### `cdx-rocks-update`
 
-Add a single CDXJ file to an existing index.
+Add a single CDXJ file to an existing index. Reads the manifest from the
+output directory to get the DB path and struct format — no `CDX_ROCKS` needed.
 
 ```bash
-cdx-rocks-update /path/to/cc-news_2026_08.cdxj.zst \
-    --catalog /path/to/all_warc_paths.txt.zst \
-    --db-dir /path/to/index/rocks
+cdx-rocks-update /path/to/cc-news_2026_09.cdxj.zst \
+    --catalog /path/to/updated_all_warc_paths.txt.zst \
+    --output-dir /path/to/index
 ```
+
+Replaces `all_warc_paths.txt.zst` in the output directory with the new catalog
+and refreshes `extent.json`.
 
 ### `cdx-rocks-shadow`
 
@@ -81,31 +90,8 @@ cdx-rocks-shadow \
 
 ## Configuration
 
-### Manifest (`cdx-rocks.json`)
+set `CDX_ROCKS` to point to a [cdx-rocks database](https://github.com/brian-learns/cdx_rocks/blob/main/docs/database_definition.md)
 
-Place this file inside your `$CDX_ROCKS` directory. It is the single source of truth:
-
-```json
-["cdx-rocks", {
-    "catalog": "all_warc_paths.txt.zst",
-    "db": "rocks/",
-    "struct_format": "!HQI"
-}]
-```
-
-Config resolution order:
-1. `cdx-rocks.json` manifest (if `$CDX_ROCKS` points to a directory containing it, or directly to the file)
-2. Environment variables (`CDX_ROCKS`, `CATALOG_PATH`)
-3. Hardcoded defaults (`/data`, `/code/all_warc_paths.txt.zst`, `!HQI`)
-
-### Struct Format
-
-| Format | ID size | Total | Max WARC files |
-|--------|---------|-------|----------------|
-| `!HQI` | 2 bytes (uint16) | 14 bytes | 65,535 |
-| `!IQI` | 4 bytes (uint32) | 16 bytes | 4,294,967,295 |
-
-Default is `!HQI` (sufficient for ~50K+ WARC files). Use `!IQI` if your catalog exceeds 65,535 entries.
 
 ## API Endpoints
 

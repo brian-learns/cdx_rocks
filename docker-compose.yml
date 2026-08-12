@@ -15,7 +15,6 @@ services:
       - ENV=production
       - PYTHONUNBUFFERED=1
       - CDX_ROCKS=/app/data
-      - CATALOG_PATH=/app/all_warc_paths.txt.zst
     restart: unless-stopped
     ulimits:
       nofile:
