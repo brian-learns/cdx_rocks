@@ -1,13 +1,19 @@
 REQUIRED_EXECUTABLES = uv rm find
 
-.PHONY: help check test clean testpackages checkdeps loaddata
+.PHONY: help check test clean testpackages checkdeps
 
 help:
 	@echo ""
-	@echo "  make check      Run ultra-fast static testing pipeline (ruff, bandit, vulture, etc.)"
-	@echo "  make test       Run static checks followed immediately by pytest"
-	@echo "  make clean      Wipe out test tool cache tracking footprints"
-	@echo "  make init       Initialize new project with uv and test setup"
+	@echo "  make check              Run ultra-fast static testing pipeline (ruff, bandit, vulture, etc.)"
+	@echo "  make test               Run static checks followed immediately by pytest"
+	@echo "  make clean              Wipe out test tool cache tracking footprints"
+	@echo "  make init               Initialize new project with uv and test setup"
+	@echo "  make command-help       Show help for all commands"
+	@echo "  uv run"
+	@echo "       cdx-rocks-serve"
+	@echo "       cdx-rocks-build"
+	@echo "       cdx-rocks-update"
+	@echo "       cdx-rocks-shadow"
 
 check:
 	@echo "\n— [An extremely fast Python linter and code formatter](https://docs.astral.sh/ruff/)"

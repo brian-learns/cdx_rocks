@@ -231,9 +231,28 @@ app.include_router(api_router)
 
 def main_serve() -> None:
     """Entry point for the cdx-rocks-serve CLI command."""
+    import argparse
+
     import uvicorn
 
-    uvicorn.run("cdx_rocks.server:app", host="127.0.0.1", port=7860)
+    parser = argparse.ArgumentParser(
+        description="Start the cdx-rocks CDX index lookup server.",
+        epilog="Set CDX_ROCKS=/path/to/index to point to your cdx-rocks.json manifest.",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind host (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=7860,
+        help="Bind port (default: 7860)",
+    )
+
+    args = parser.parse_args()
+    uvicorn.run("cdx_rocks.server:app", host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

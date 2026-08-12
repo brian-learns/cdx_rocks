@@ -109,13 +109,15 @@ def resolve_rocks_dir(cdx_rocks_env: str | None = None) -> str:
     """Return the RocksDB directory path from the manifest.
 
     Requires ``$CDX_ROCKS`` (or explicit argument) pointing to a manifest.
-    Raises ``ManifestError`` if the manifest is missing or invalid.
+    Falls back to ``/data`` if the env is not set, so the module can be imported
+    (e.g. for ``--help``). The server will fail at startup if the manifest is
+    missing when it tries to open the DB.
     """
     if cdx_rocks_env is None:
         cdx_rocks_env = os.environ.get("CDX_ROCKS")
 
     if not cdx_rocks_env:
-        raise ManifestError("CDX_ROCKS environment variable is not set")
+        return "/data"
 
     manifest = _find_manifest(cdx_rocks_env)
     if manifest is None:
@@ -130,13 +132,15 @@ def resolve_catalog_path(cdx_rocks_env: str | None = None) -> str:
     """Return the catalog file path from the manifest.
 
     Requires ``$CDX_ROCKS`` (or explicit argument) pointing to a manifest.
-    Raises ``ManifestError`` if the manifest is missing or invalid.
+    Falls back to ``/data/all_warc_paths.txt.zst`` if the env is not set, so the
+    module can be imported (e.g. for ``--help``). The server will fail at startup
+    if the manifest is missing when it tries to open the DB.
     """
     if cdx_rocks_env is None:
         cdx_rocks_env = os.environ.get("CDX_ROCKS")
 
     if not cdx_rocks_env:
-        raise ManifestError("CDX_ROCKS environment variable is not set")
+        return "/data/all_warc_paths.txt.zst"
 
     manifest = _find_manifest(cdx_rocks_env)
     if manifest is None:
@@ -151,13 +155,15 @@ def resolve_struct_format(cdx_rocks_env: str | None = None) -> str:
     """Return the struct format string from the manifest.
 
     Requires ``$CDX_ROCKS`` (or explicit argument) pointing to a manifest.
-    Raises ``ManifestError`` if the manifest is missing or invalid.
+    Falls back to ``!HQI`` if the env is not set, so the module can be imported
+    (e.g. for ``--help``). The server will fail at startup if the manifest is
+    missing when it tries to open the DB.
     """
     if cdx_rocks_env is None:
         cdx_rocks_env = os.environ.get("CDX_ROCKS")
 
     if not cdx_rocks_env:
-        raise ManifestError("CDX_ROCKS environment variable is not set")
+        return "!HQI"
 
     manifest = _find_manifest(cdx_rocks_env)
     if manifest is None:

@@ -102,8 +102,7 @@ def update_index(
     manifest_path = out / "cdx-rocks.json"
     if not manifest_path.is_file():
         raise ManifestError(
-            f"No cdx-rocks.json manifest found in {output_dir}. "
-            "Run cdx-rocks-build first to create the initial index."
+            f"No cdx-rocks.json manifest found in {output_dir}. Run cdx-rocks-build first to create the initial index."
         )
 
     cfg = load_manifest(manifest_path)
@@ -195,9 +194,7 @@ def update_index(
 
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point for cdx-rocks-update."""
-    parser = argparse.ArgumentParser(
-        description="Add a CDXJ file to an existing cdx-rocks index."
-    )
+    parser = argparse.ArgumentParser(description="Add a CDXJ file to an existing cdx-rocks index.")
     parser.add_argument(
         "cdxj_file",
         help="Path to a .cdxj.zst file",

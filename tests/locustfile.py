@@ -8,7 +8,7 @@ Usage:
 import pathlib
 from locust import HttpUser, task, between
 
-BASE_URL = "http://0.0.0.0:7860"
+BASE_URL = "http://0.0.0.0:7860/cdx-index"
 URLS_FILE = pathlib.Path(__file__).parent / "1000urls.txt"
 
 # Load test URLs once at import time

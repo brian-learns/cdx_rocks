@@ -30,7 +30,13 @@ def get_rocks_dir(rocksdb_dir: str, linksdir: str) -> str:
         return rocksdb_dir
     except (PermissionError, FileNotFoundError, OSError):
         logger.info(f"{rocksdb_dir}/{CONFIG_FILENAME} write error, creating shadow {linksdir}")
-        return str(setup_shadow(Path(rocksdb_dir), Path(linksdir)))
+        try:
+            return str(setup_shadow(Path(rocksdb_dir), Path(linksdir)))
+        except FileNotFoundError:
+            # Source directory doesn't exist (e.g. --help without CDX_ROCKS set).
+            # Return the original path and let the lifespan fail with a clear message.
+            logger.warning(f"Source directory {rocksdb_dir} does not exist, returning original path")
+            return rocksdb_dir
 
 
 def setup_shadow(rocksdb_dir: Path, linksdir: Path) -> Path:

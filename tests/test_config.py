@@ -130,10 +130,12 @@ class TestResolveFunctions:
         monkeypatch.setenv("CDX_ROCKS", str(tmp_path))
         assert resolve_struct_format() == "!IIQ"
 
-    def test_raises_when_cdx_rocks_not_set(self, monkeypatch: pytest.MonkeyPatch):
+    def test_fallbacks_when_cdx_rocks_not_set(self, monkeypatch: pytest.MonkeyPatch):
+        """resolve_*() return safe defaults when CDX_ROCKS is not set."""
         monkeypatch.delenv("CDX_ROCKS", raising=False)
-        with pytest.raises(ManifestError, match="CDX_ROCKS environment variable is not set"):
-            resolve_rocks_dir()
+        assert resolve_rocks_dir() == "/data"
+        assert resolve_catalog_path() == "/data/all_warc_paths.txt.zst"
+        assert resolve_struct_format() == "!HQI"
 
     def test_raises_when_manifest_not_found(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("CDX_ROCKS", "/nonexistent/path")
