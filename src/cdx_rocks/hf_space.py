@@ -18,7 +18,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # --- Defaults ---
-DEFAULT_HF_BUCKET = "brian-learns/cdx-rocks-demo"
+DEFAULT_HF_BUCKET = "brian-learns/cdx-rocks-2023-2024"
 DEFAULT_LOCAL_DIR = "/tmp/cdx-rocks-hf"  # noqa: S108  # nosec B108  # HF Spaces: /tmp is ephemeral NVMe disk
 
 
