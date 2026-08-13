@@ -9,6 +9,7 @@ from cdx_rocks.config import (
     resolve_rocks_dir,
     resolve_struct_format,
 )
+from cdx_rocks.hf_space import resolve_hf_base_path
 from cdx_rocks.index import VALUE_FORMAT, VALUE_SIZE, query_index
 from cdx_rocks.schema import safe_pack, safe_unpack, validate_struct_format
 from cdx_rocks.shadow import get_rocks_dir, setup_shadow
@@ -24,6 +25,7 @@ __all__ = [
     "load_manifest",
     "query_index",
     "resolve_catalog_path",
+    "resolve_hf_base_path",
     "resolve_rocks_dir",
     "resolve_struct_format",
     "safe_pack",

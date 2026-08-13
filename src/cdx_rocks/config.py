@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from cdx_rocks.hf_space import resolve_hf_base_path
 from cdx_rocks.schema import validate_struct_format
 
 # --- logging ---
@@ -116,6 +117,12 @@ def resolve_rocks_dir(cdx_rocks_env: str | None = None) -> str:
     if cdx_rocks_env is None:
         cdx_rocks_env = os.environ.get("CDX_ROCKS")
 
+    # HF Space: sync bucket if needed (cached per-process)
+    if not cdx_rocks_env:
+        hf_path = resolve_hf_base_path()
+        if hf_path is not None:
+            cdx_rocks_env = hf_path
+
     if not cdx_rocks_env:
         return "/data"
 
@@ -139,6 +146,12 @@ def resolve_catalog_path(cdx_rocks_env: str | None = None) -> str:
     if cdx_rocks_env is None:
         cdx_rocks_env = os.environ.get("CDX_ROCKS")
 
+    # HF Space: sync bucket if needed (cached per-process)
+    if not cdx_rocks_env:
+        hf_path = resolve_hf_base_path()
+        if hf_path is not None:
+            cdx_rocks_env = hf_path
+
     if not cdx_rocks_env:
         return "/data/all_warc_paths.txt.zst"
 
@@ -161,6 +174,12 @@ def resolve_struct_format(cdx_rocks_env: str | None = None) -> str:
     """
     if cdx_rocks_env is None:
         cdx_rocks_env = os.environ.get("CDX_ROCKS")
+
+    # HF Space: sync bucket if needed (cached per-process)
+    if not cdx_rocks_env:
+        hf_path = resolve_hf_base_path()
+        if hf_path is not None:
+            cdx_rocks_env = hf_path
 
     if not cdx_rocks_env:
         return "!HQI"
