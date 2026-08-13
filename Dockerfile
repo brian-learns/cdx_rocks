@@ -13,13 +13,13 @@ ENV UV_LINK_MODE=copy
 # Idiomatic astral way to force global system package installation
 ENV UV_PROJECT_ENVIRONMENT="/usr/local"
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 
 # Standard uv sync commands (no conflicting flags)
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
-COPY . .
+COPY ./src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
