@@ -36,6 +36,9 @@ def resolve_hf_base_path() -> str | None:
     if os.environ.get("HUGGING_FACE") != "1":
         return None
 
+    # HF Spaces: /home is read-only, so redirect HF/xet cache to /tmp
+    os.environ.setdefault("HF_HOME", "/tmp/hf_cache")  # noqa: S108  # nosec B108
+
     try:
         from huggingface_hub import HfApi
     except ImportError as exc:
