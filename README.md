@@ -1,3 +1,12 @@
+---
+title: Cdx Rocks Demo
+emoji: 📉
+colorFrom: gray
+colorTo: indigo
+sdk: docker
+pinned: false
+license: bsd-3-clause
+---
 # `cdx_rocks`
 
 `/lookup` server component for https://github.com/brian-learns/ccnget
