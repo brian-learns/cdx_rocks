@@ -11,15 +11,23 @@ license: bsd-3-clause
 
 `/lookup` server component for https://github.com/brian-learns/ccnget
 
+This repo is on github and a hugging face space.
+
+[🤗 Hugging Face Space](https://huggingface.co/spaces/brian-learns/cc-news-cdx-server) | [🐙 github repo](https://github.com/brian-learns/cdx_rocks)
+
 FastAPI server backed by RocksDB for looking up CDX index records from the Common Crawl News dataset.
 
 ## Download Data
 
+| URL | Size | Description |
+| :--- | :---: | :--- |
+| <https://huggingface.co/buckets/brian-learns/cdx-rocks-demo> | 3.69G | For testing |
+| <https://huggingface.co/buckets/brian-learns/cdx-rocks-2023-2024> | 18.2G | Current Hugging Face Space database |
+| <https://huggingface.co/buckets/brian-learns/cdx-rocks-monthly> | 77.4G | Full database updated monthly |
+
 ```
-# small test index that contains http://example.com/ record
+# put a database directory at ./rocksdb_index when using the docker-compose.yml
 uvx hf sync hf://buckets/brian-learns/cdx-rocks-demo rocksdb_index
-# full index
-https://huggingface.co/buckets/brian-learns/cdx-rocks-monthly
 ```
 
 ## Run the server
