@@ -3,7 +3,15 @@
 import json
 from typing import cast
 
-from cdx_rocks.report import REPORT_FILENAME, ReportCounter, load_report, surt_host_patterns, write_report
+from cdx_rocks.report import (
+    REPORT_FILENAME,
+    ReportCounter,
+    load_report,
+    looks_like_surt,
+    surt_browse,
+    surt_host_patterns,
+    write_report,
+)
 
 
 class TestSurtHostPatterns:
@@ -154,3 +162,100 @@ class TestReportFile:
         path.write_text("[1, 2, 3]")
         loaded = load_report(path)
         assert loaded.total_entries == 0
+
+
+class TestLooksLikeSurt:
+    """Verify URL vs SURT key auto-detection."""
+
+    def test_surt_forms_detected(self):
+        assert looks_like_surt("com,example")
+        assert looks_like_surt("com,yahoo,news")
+        assert looks_like_surt("com,example)/page1")
+        assert looks_like_surt("82,2,237,15)")
+
+    def test_urls_not_detected(self):
+        assert not looks_like_surt("https://example.com/page1")
+        assert not looks_like_surt("http://www.yahoo.com/")
+        assert not looks_like_surt("example.com/page1")
+        assert not looks_like_surt("com")
+        assert not looks_like_surt("")
+
+    def test_scheme_wins_over_comma(self):
+        # A URL with a comma in the path still has a scheme, so stays a URL
+        assert not looks_like_surt("https://en.wikipedia.org/wiki/A,_B")
+
+
+class TestSurtBrowse:
+    """Verify one-hop tree traversal over a report dict."""
+
+    REPORT = {
+        "total_entries": 7,
+        "patterns": {
+            "com": 3,
+            "com,example": 2,
+            "com,desample": 1,
+            "org": 1,
+            "org,other": 1,
+            "org,deep": 0,  # zero-count entries can exist; order by count desc
+            "82,2,237,15": 2,  # dotted-IP host: only the full host is counted
+        },
+    }
+
+    def test_root_lists_top_level_labels(self):
+        result = surt_browse("", self.REPORT)
+        assert result["pattern"] == ""
+        assert result["count"] == 0
+        assert result["total_children"] == 3
+        children = cast("dict[str, int]", result["children"])
+        # com(3) first, then 82,2,237,15(2), then org(1)
+        assert list(children) == ["com", "82,2,237,15", "org"]
+        assert children["com"] == 3
+        assert children["org"] == 1
+
+    def test_orphan_numeric_host_promoted_to_root(self):
+        # 82,2,237,15 has no parent in the report (numeric hosts skip
+        # sub-prefixes), so it must appear at the root to stay reachable
+        result = surt_browse("", self.REPORT)
+        children = cast("dict[str, int]", result["children"])
+        assert "82,2,237,15" in children
+        assert children["82,2,237,15"] == 2
+
+    def test_one_level_down(self):
+        result = surt_browse("com", self.REPORT)
+        assert result["pattern"] == "com"
+        assert result["count"] == 3
+        assert result["children"] == {"com,example": 2, "com,desample": 1}
+        assert result["total_children"] == 2
+
+    def test_leaf_host_has_no_children(self):
+        result = surt_browse("com,example", self.REPORT)
+        assert result["count"] == 2
+        assert result["children"] == {}
+        assert result["total_children"] == 0
+
+    def test_unknown_pattern_empty(self):
+        result = surt_browse("net", self.REPORT)
+        assert result["count"] == 0
+        assert result["children"] == {}
+
+    def test_limit_caps_children(self):
+        result = surt_browse("", self.REPORT, limit=1)
+        children = cast("dict[str, int]", result["children"])
+        assert len(children) == 1
+        assert list(children) == ["com"]
+        assert result["total_children"] == 3
+
+    def test_deeper_level_excludes_grandchildren(self):
+        report = {
+            "total_entries": 1,
+            "patterns": {"uk": 1, "uk,co": 1, "uk,co,dailymail": 1},
+        }
+        result = surt_browse("uk", report)
+        assert result["children"] == {"uk,co": 1}
+        result = surt_browse("uk,co", report)
+        assert result["children"] == {"uk,co,dailymail": 1}
+
+    def test_missing_patterns_field(self):
+        result = surt_browse("", {"total_entries": 0})
+        assert result["children"] == {}
+        assert result["count"] == 0

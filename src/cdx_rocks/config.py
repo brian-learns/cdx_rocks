@@ -106,6 +106,27 @@ def _find_manifest(cdx_rocks_env: str | None) -> Path | None:
     return None
 
 
+def resolve_manifest_path(cdx_rocks_env: str | None = None) -> Path | None:
+    """Return the path to the ``cdx-rocks.json`` manifest, or ``None``.
+
+    Uses the same resolution chain as the other resolvers (``$CDX_ROCKS``
+    first, then the HF Space base path). Returns ``None`` when no manifest
+    is available (e.g. the ``/data`` fallback without ``CDX_ROCKS`` set).
+    """
+    if cdx_rocks_env is None:
+        cdx_rocks_env = os.environ.get("CDX_ROCKS")
+
+    if not cdx_rocks_env:
+        hf_path = resolve_hf_base_path()
+        if hf_path is not None:
+            cdx_rocks_env = hf_path
+
+    if not cdx_rocks_env:
+        return None
+
+    return _find_manifest(cdx_rocks_env)
+
+
 def resolve_rocks_dir(cdx_rocks_env: str | None = None) -> str:
     """Return the RocksDB directory path from the manifest.
 

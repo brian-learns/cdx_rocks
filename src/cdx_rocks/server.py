@@ -1,12 +1,13 @@
 """FastAPI server for cdx-rocks CDX index lookup."""
 
+import json
 import logging
 import os
 import tempfile
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 from pathlib import Path
-from typing import Annotated, override
+from typing import Annotated, Literal, override
 
 import zstandard as zstd
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
@@ -14,8 +15,9 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from rocksdict import AccessType, DBCompressionType, Options, Rdict
 
-from cdx_rocks.config import resolve_catalog_path, resolve_rocks_dir, resolve_struct_format
+from cdx_rocks.config import resolve_catalog_path, resolve_manifest_path, resolve_rocks_dir, resolve_struct_format
 from cdx_rocks.index import query_index
+from cdx_rocks.report import REPORT_FILENAME, looks_like_surt, surt_browse
 from cdx_rocks.schema import validate_struct_format as _validate_struct_format
 from cdx_rocks.shadow import get_rocks_dir
 
@@ -37,8 +39,14 @@ ROCKSDB_DIR = get_rocks_dir(
     tempfile.mkdtemp(prefix="cdx_", suffix="_rocks"),
 )
 CATALOG_PATH = resolve_catalog_path()
+# The SURT report lives in the index directory next to the manifest.
+# If the index predates the report feature the file is simply missing.
+_MANIFEST_PATH = resolve_manifest_path()
+SURT_REPORT_PATH = (
+    (_MANIFEST_PATH.parent / REPORT_FILENAME) if _MANIFEST_PATH else Path(ROCKSDB_DIR).parent / REPORT_FILENAME
+)
 
-API_VERSION = "0.5.0"
+API_VERSION = "0.6.0"
 DESCRIPTION = f"""
 URL lookup tool for [Common Crawl News Dataset](https://data.commoncrawl.org/crawl-data/CC-NEWS/index.html) indexed in RocksDB with a simple API.
 
@@ -79,7 +87,7 @@ class CaptureResult(BaseModel):
 class LookupResponse(BaseModel):
     """Response body for a CDX index lookup query."""
 
-    query_url: Annotated[str, Field(description="Original requested URL")]
+    query_url: Annotated[str, Field(description="Original query as requested (URL or literal SURT key)")]
     surt_prefix: Annotated[str, Field(description="SURT string used for lookup")]
     exact_match: Annotated[bool, Field(description="Whether exact matching was used")]
     at_timestamp: Annotated[str | None, Field(description="Timestamp parameter requested")] = None
@@ -94,6 +102,23 @@ class ExtentResponse(BaseModel):
     file_extent: Annotated[int, Field(description="number of files covered by this index")]
     file_oldest: Annotated[str, Field(description="first WARC file in this index")]
     file_newest: Annotated[str, Field(description="last WARC file added to this index")]
+
+
+class SurtBrowseResponse(BaseModel):
+    """One hop down the SURT host tree from ``/cdx-index/surt``.
+
+    Children are keyed by full pattern string (e.g. ``"com,example"``), so
+    the value is also the URL to fetch the next level.
+    """
+
+    pattern: Annotated[str, Field(description="Pattern browsed ('' is the root)")]
+    count: Annotated[int, Field(description="Indexed entries under this exact host pattern")]
+    total_entries: Annotated[int, Field(description="Total entries in the whole index")]
+    children: Annotated[
+        dict[str, int],
+        Field(description="Direct children (pattern -> count), sorted by count desc, capped by limit"),
+    ]
+    total_children: Annotated[int, Field(description="Number of children before the limit was applied")]
 
 
 class HealthCheckFilter(logging.Filter):
@@ -166,6 +191,12 @@ def redirect_old_extent():
     return RedirectResponse(url="/cdx-index/extent")
 
 
+@app.get("/surt", include_in_schema=False)
+def redirect_surt(request: Request):
+    """Redirect /surt to /cdx-index/surt"""
+    return RedirectResponse(url=f"/cdx-index/surt?{request.url.query}")
+
+
 @app.get("/health", include_in_schema=False)
 async def health():
     """Healthcheck endpoint. Verifies catalog and RocksDB are loaded."""
@@ -181,7 +212,17 @@ async def health():
 # --- FastAPI Route ---
 @api_router.get("/lookup", response_model=LookupResponse)
 async def lookup_endpoint(
-    url: Annotated[str, Query(description="URL to look for in the archive")],
+    url: Annotated[str, Query(description="URL to look for in the archive, or a literal SURT key (see key)")],
+    key: Annotated[
+        Literal["url", "surt"],
+        Query(
+            description=(
+                "How to read the url parameter. 'url' (default): parse as a URL — unless it "
+                "already looks like a SURT key (has commas and no scheme), in which case it is "
+                "used verbatim. 'surt': always treat url as a literal SURT key."
+            )
+        ),
+    ] = "url",
     exact: Annotated[bool, Query(description="Exact matching vs prefix matching")] = False,
     at: Annotated[
         str | None,
@@ -191,9 +232,17 @@ async def lookup_endpoint(
     ] = None,
     limit: Annotated[int, Query(description="Maximum number of results to return", ge=1, le=100)] = 10,
 ):
-    """REST API endpoint supporting exact, partial prefix, or timestamp-targeted matching."""
+    """REST API endpoint supporting exact, partial prefix, or timestamp-targeted matching.
+
+    Accepts URLs (``http://www.yahoo.com/``) or literal SURT keys
+    (``com,yahoo,news`` — e.g. copied from ``/cdx-index/surt``). SURT-looking
+    input (commas, no scheme) is auto-detected; force it with ``key=surt``.
+    """
+    as_surt_key = key == "surt" or looks_like_surt(url)
     try:
-        surt_prefix, captures = query_index(app, url, exact_match=exact, limit=limit, at=at)
+        surt_prefix, captures = query_index(
+            app, url, exact_match=exact, limit=limit, at=at, surt_key=url if as_surt_key else None
+        )
     except ValueError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:
@@ -223,6 +272,51 @@ async def extent_endpoint():
         "file_extent": len(catalog),
         "file_oldest": catalog[first_key],
         "file_newest": catalog[last_key],
+    }
+
+
+def _load_surt_report() -> dict[str, object] | None:
+    """Read surt_report.json from the index directory, or None if absent/corrupt."""
+    try:
+        data = json.loads(SURT_REPORT_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+@api_router.get("/surt", response_model=SurtBrowseResponse)
+async def surt_browse_endpoint(
+    pattern: Annotated[
+        str,
+        Query(
+            description=(
+                "SURT host pattern to expand (comma-joined labels, e.g. 'com' or 'com,example'). "
+                "Empty for the root level."
+            )
+        ),
+    ] = "",
+    limit: Annotated[int, Query(description="Maximum number of children to return", ge=1, le=200)] = 50,
+):
+    """Browse the index's SURT host tree one level at a time.
+
+    Each child key is itself a valid ``pattern`` value, so the tree can be
+    walked level by level until a leaf host. Counts are entry totals from
+    ``surt_report.json`` (build + updates), not unique URLs.
+    """
+    report = _load_surt_report()
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No surt_report.json in the index directory (index built before the SURT report feature).",
+        )
+
+    result = surt_browse(pattern, report, limit=limit)
+    return {
+        "pattern": result["pattern"],
+        "count": result["count"],
+        "total_entries": report.get("total_entries", 0),
+        "children": result["children"],
+        "total_children": result["total_children"],
     }
 
 

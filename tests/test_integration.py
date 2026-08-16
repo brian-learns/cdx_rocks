@@ -383,3 +383,153 @@ def test_lookup_endpoint_after_real_build(tmp_path: Path):
     finally:
         db.close()
         _clear_state()
+
+
+def test_surt_endpoint_browses_host_tree(tmp_path: Path):
+    """The /cdx-index/surt endpoint walks the report's host label tree."""
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir = tmp_path / "cdxj"
+    cdxj_dir.mkdir(parents=True)
+
+    _make_cdxj(cdxj_dir, test_catalog)
+    build_index(str(cdxj_dir), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    # Point the server at this index's surt_report.json
+    original_report_path = server.SURT_REPORT_PATH
+    server.SURT_REPORT_PATH = output_dir / "surt_report.json"
+
+    try:
+        client = TestClient(server.app)
+
+        # Root level: top-level labels with counts
+        resp = client.get("/cdx-index/surt")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["pattern"] == ""
+        assert body["count"] == 0
+        assert body["total_entries"] == 3
+        assert body["total_children"] == 2
+        assert body["children"] == {"com": 2, "org": 1}
+
+        # One level down
+        resp = client.get("/cdx-index/surt", params={"pattern": "com"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["pattern"] == "com"
+        assert body["count"] == 2
+        assert body["children"] == {"com,example": 2}
+
+        # Leaf host: its own count, no children
+        resp = client.get("/cdx-index/surt", params={"pattern": "com,example"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 2
+        assert body["children"] == {}
+        assert body["total_children"] == 0
+
+        # Unknown pattern: valid response, empty
+        resp = client.get("/cdx-index/surt", params={"pattern": "net"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 0
+        assert body["children"] == {}
+
+        # Limit caps the children
+        resp = client.get("/cdx-index/surt", params={"limit": 1})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["children"]) == 1
+        assert list(body["children"]) == ["com"]
+        assert body["total_children"] == 2
+    finally:
+        server.SURT_REPORT_PATH = original_report_path
+
+
+def test_surt_endpoint_404_without_report(tmp_path: Path):
+    """Indexes built before the report feature get a clear 404."""
+    original_report_path = server.SURT_REPORT_PATH
+    server.SURT_REPORT_PATH = tmp_path / "nope" / "surt_report.json"
+    try:
+        client = TestClient(server.app)
+        resp = client.get("/cdx-index/surt")
+        assert resp.status_code == 404
+        assert "surt_report.json" in resp.json()["detail"]
+    finally:
+        server.SURT_REPORT_PATH = original_report_path
+
+
+def test_surt_root_redirects_to_router_path():
+    """Top-level /surt redirects to /cdx-index/surt preserving the query."""
+    client = TestClient(server.app, follow_redirects=False)
+    resp = client.get("/surt", params={"pattern": "com", "limit": 3})
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "/cdx-index/surt?pattern=com&limit=3"
+
+
+def test_lookup_accepts_surt_key(tmp_path: Path):
+    """/lookup accepts a literal SURT key, auto-detected or via key=surt."""
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir = tmp_path / "cdxj"
+    cdxj_dir.mkdir(parents=True)
+
+    _make_cdxj(cdxj_dir, test_catalog)
+    build_index(str(cdxj_dir), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    opts = Options(raw_mode=True)
+    db = Rdict(str(output_dir / "rocks"), options=opts, access_type=AccessType.read_only())
+    id_to_path = _load_id_to_path(output_dir / "all_warc_paths.txt.zst")
+    server.app.state.db = db
+    server.app.state.catalog = id_to_path
+
+    try:
+        client = TestClient(server.app)
+
+        # Fantasy query: a SURT prefix copied from /cdx-index/surt, no key param —
+        # auto-detected because it has commas and no scheme
+        resp = client.get("/cdx-index/lookup", params={"url": "com,example", "exact": False, "limit": 10})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["query_url"] == "com,example"
+        assert body["surt_prefix"] == "com,example"
+        assert body["total_results"] == 2
+        assert {r["surt_key"] for r in body["results"]} == {"com,example)/page1"}
+        assert {r["offset"] for r in body["results"]} == {100, 600}
+
+        # Explicit key=surt with a full SURT key including the path
+        resp = client.get(
+            "/cdx-index/lookup",
+            params={"url": "com,example)/page1", "key": "surt", "exact": True},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["surt_prefix"] == "com,example)/page1"
+        assert body["total_results"] == 2
+        assert {r["timestamp"] for r in body["results"]} == {"20260101120000", "20260102130000"}
+
+        # key=surt on a host prefix works too
+        resp = client.get("/cdx-index/lookup", params={"url": "org,other", "key": "surt"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total_results"] == 1
+        assert body["results"][0]["surt_key"] == "org,other)/news"
+        assert body["results"][0]["offset"] == 1400
+
+        # Non-matching SURT key: clean empty result
+        resp = client.get("/cdx-index/lookup", params={"url": "com,nonexistent"})
+        assert resp.status_code == 200
+        assert resp.json()["total_results"] == 0
+
+        # Regression: a plain URL still behaves exactly as before
+        resp = client.get(
+            "/cdx-index/lookup",
+            params={"url": "https://example.com/page1", "exact": True},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["surt_prefix"] == "com,example)/page1"
+        assert body["total_results"] == 2
+    finally:
+        db.close()
+        _clear_state()

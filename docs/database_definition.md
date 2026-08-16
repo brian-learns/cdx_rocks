@@ -2,12 +2,13 @@
 
 Goal: provide a fast key/value lookup for [CDXj indexes of WARC files](https://specs.webrecorder.net/cdxj/0.1.0/).
 
-A `cdx-rocks` database consists of a directory or tar file containing three primary artifacts.
+A `cdx-rocks` database consists of a directory or tar file containing the following artifacts.
 
  1. `cdx-rocks.json` file specifying the catalog file, rocks db directory, and [`struct_format`](./struct_format.md).
- 2. A catalog file
+ 2. A catalog file listing all indexed WARC files, one per line
  3. a RocksDB directory
- 4. optional `extent.json` file with the same contents as /extent API endpoint
+ 4. `extent.json` file with the same contents as /extent API endpoint
+ 5. [`surt_report.json`](./surt_report.md) file with SURT host label-prefix statistics
 
 ## `cdx-rocks.json`
 sample file
@@ -47,6 +48,9 @@ Position of the file in the catalog is packed into the first part of the value s
 
 Entries in the catalog file are lexicographically sorted, which naturally arranges the WARCs in chronological order from oldest to newest.
 
+`extent.json` is derived from the catalog file; `"file_extent":` is the nuver of lines, `"file_oldest":` is the first line, and `"file_newest":` is the last line.  The
+`cdx_rocks` server does not read this file, it's provided in the database file to make it eaiser to identify what is in the index.
+
 
 ## RocksDB directory
 A RocksDB directory created with `rocksdict` or containing a `rocksdict-config.json` file.
@@ -62,3 +66,12 @@ Values
 struct_format = value_from_json
 packed_value = struct.pack(struct_format, absolute_warc_id, offset, length)
 ```
+
+## `surt_report.json`
+
+Statistics artifact maintained by the build and update CLIs. It counts every
+SURT host label-prefix seen in the CDXJ input (e.g. `com,example)/page` contributes
++1 to `"com"` and +1 to `"com,example"`; dotted-IP hosts count only their full host),
+and is the data source for the `/cdx-index/surt` browse endpoint.
+
+Full specification: [`surt_report.md`](./surt_report.md).

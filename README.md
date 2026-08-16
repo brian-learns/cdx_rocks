@@ -80,6 +80,7 @@ Writes to the output directory:
 - `cdx-rocks.json` — manifest (catalog, db path, struct format)
 - `all_warc_paths.txt.zst` — copied catalog
 - `extent.json` — static snapshot of file count and date range
+- `surt_report.json` — host label-prefix entry counts (feeds `/cdx-index/surt`)
 
 ### `cdx-rocks-update`
 
@@ -93,7 +94,8 @@ cdx-rocks-update /path/to/cc-news_2026_09.cdxj.zst \
 ```
 
 Replaces `all_warc_paths.txt.zst` in the output directory with the new catalog
-and refreshes `extent.json`.
+and refreshes `extent.json` and `surt_report.json` (new counts are merged
+into the existing report).
 
 ### `cdx-rocks-shadow`
 
@@ -116,6 +118,7 @@ set `CDX_ROCKS` to point to a [cdx-rocks database](https://github.com/brian-lear
 |----------|--------|-------------|
 | `/cdx-index/lookup` | GET | Query CDX index for URL captures |
 | `/cdx-index/extent` | GET | Show indexed WARC file count and date range |
+| `/cdx-index/surt` | GET | Browse the SURT host tree one level at a time |
 | `/health` | GET | Server health check |
 | `/docs` | GET | Swagger/OpenAPI documentation |
 
@@ -123,10 +126,27 @@ set `CDX_ROCKS` to point to a [cdx-rocks database](https://github.com/brian-lear
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `url` | string | (required) | URL to look up in the archive |
+| `url` | string | (required) | URL to look up in the archive, or a literal SURT key (see `key`) |
+| `key` | string | `url` | `url` or `surt`: how to read `url`. SURT-looking input (commas, no `://` scheme) is auto-detected even with the default |
 | `exact` | bool | `false` | Exact SURT match vs prefix match |
 | `at` | string | `null` | Timestamp to seek from (YYYYMMDDhhmmss) |
 | `limit` | int | 10 | Max results (1-100) |
+
+SURT keys can be copied straight from `/cdx-index/surt` child keys, e.g.
+`/cdx-index/lookup?url=com,yahoo,news` (auto-detected) or
+`/cdx-index/lookup?url=com,yahoo,news&key=surt` (forced).
+
+### Surt Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pattern` | string | `""` | SURT host pattern to expand (comma-joined labels, e.g. `com` or `com,example`); empty for the root |
+| `limit` | int | 50 | Max children returned (1-200); `total_children` reports the true count |
+
+Each child key in the response is itself a valid `pattern`, so the tree can be
+walked level by level. Counts come from `surt_report.json` (indexed entries,
+cumulative across build + updates, not unique URLs). Dotted-IP hosts (which
+count only their full host) appear as promoted entries at the root level.
 
 ## Tests
 

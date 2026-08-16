@@ -25,11 +25,14 @@ def query_index(
     exact_match: bool = False,
     limit: int = 10,
     at: str | None = None,
+    surt_key: str | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Core lookup engine:
 
     - exact_match=True + at: Seeks directly in RocksDB to the first record >= 'at' timestamp.
     - exact_match=False + at: Scans prefix entries and returns closest matches sorted by proximity to 'at'.
+    - surt_key: If given, used verbatim as the SURT prefix (no URL parsing), so
+      callers can query with a literal SURT key such as ``com,yahoo,news``.
     """
     from contextlib import suppress
 
@@ -39,7 +42,10 @@ def query_index(
 
     catalog: dict[int, str] = getattr(app.state, "catalog", {})
 
-    surt_str = surt.surt(url)
+    if surt_key is not None:
+        surt_str: str = surt_key
+    else:
+        surt_str = str(surt.surt(url))
 
     # Determine prefix and database seeking key
     if exact_match:
