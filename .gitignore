@@ -9,6 +9,5 @@ wheels/
 # Virtual environments
 .venv
 
-rocksdb_index
-rocksdb_index/
+rocksdb_*
 all_warc_paths.txt.zst

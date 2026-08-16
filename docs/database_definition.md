@@ -48,8 +48,8 @@ Position of the file in the catalog is packed into the first part of the value s
 
 Entries in the catalog file are lexicographically sorted, which naturally arranges the WARCs in chronological order from oldest to newest.
 
-`extent.json` is derived from the catalog file; `"file_extent":` is the nuver of lines, `"file_oldest":` is the first line, and `"file_newest":` is the last line.  The
-`cdx_rocks` server does not read this file, it's provided in the database file to make it eaiser to identify what is in the index.
+`extent.json` is derived from the catalog file; `"file_extent":` is the number of lines, `"file_oldest":` is the first line, and `"file_newest":` is the last line.  The
+`cdx_rocks` server does not read this file, it's provided in the database file to make it easier to identify what is in the index.
 
 
 ## RocksDB directory

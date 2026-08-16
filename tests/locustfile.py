@@ -81,8 +81,7 @@ def _load_surt_patterns(report_path: Path | None) -> list[str]:
 SURT_REPORT = _resolve_report_path()
 SURT_PATTERNS = _load_surt_patterns(SURT_REPORT)
 
-# Single-label patterns have no comma, so the server would auto-detect them
-# as URLs; only comma-bearing patterns can be auto-detected as SURT keys.
+# Multi-label patterns, used to exercise /surt at depth.
 SURT_PATTERNS_MULTI = [p for p in SURT_PATTERNS if "," in p]
 if not SURT_PATTERNS_MULTI:
     SURT_PATTERNS_MULTI = ["com,example", "org,wikipedia"]
@@ -129,24 +128,13 @@ class LookupUser(HttpUser):
     def lookup_surt_key(self):
         """Look up a literal SURT key copied from a /surt browse response.
 
-        Auto-detected as a SURT key (commas, no scheme) — the server skips
-        URL parsing and uses the key verbatim.
+        key=surt makes the server use the key verbatim (no URL parsing),
+        including single-label hosts that would otherwise parse as URLs.
         """
-        pattern = random.choice(SURT_PATTERNS_MULTI)
-        self.client.get(
-            "/lookup",
-            name="/lookup (surt)",
-            params={"url": pattern, "limit": random.randint(1, 10)},
-        )
-
-    @task(1)
-    def lookup_surt_key_forced(self):
-        """Force SURT handling with key=surt, including single-label hosts
-        that auto-detection would misread as URLs."""
         pattern = random.choice(SURT_PATTERNS)
         self.client.get(
             "/lookup",
-            name="/lookup (surt, forced)",
+            name="/lookup (surt)",
             params={"url": pattern, "key": "surt", "limit": random.randint(1, 10)},
         )
 

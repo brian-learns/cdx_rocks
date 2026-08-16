@@ -126,15 +126,17 @@ set `CDX_ROCKS` to point to a [cdx-rocks database](https://github.com/brian-lear
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `url` | string | (required) | URL to look up in the archive, or a literal SURT key (see `key`) |
-| `key` | string | `url` | `url` or `surt`: how to read `url`. SURT-looking input (commas, no `://` scheme) is auto-detected even with the default |
+| `url` | string | (required) | URL to look up in the archive, or (with `key=surt`) a literal SURT key |
+| `key` | string | `url` | `url` or `surt`: how to read `url`. `surt` uses `url` verbatim as a SURT key |
 | `exact` | bool | `false` | Exact SURT match vs prefix match |
 | `at` | string | `null` | Timestamp to seek from (YYYYMMDDhhmmss) |
 | `limit` | int | 10 | Max results (1-100) |
 
 SURT keys can be copied straight from `/cdx-index/surt` child keys, e.g.
-`/cdx-index/lookup?url=com,yahoo,news` (auto-detected) or
-`/cdx-index/lookup?url=com,yahoo,news&key=surt` (forced).
+`/cdx-index/lookup?url=com,yahoo,news&key=surt`.
+
+Keys whose host was never indexed (not in `surt_report.json`) return an
+empty result (`total_results: 0`) — no 404.
 
 ### Surt Parameters
 

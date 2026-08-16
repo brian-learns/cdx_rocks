@@ -9,6 +9,7 @@ import surt
 from fastapi.testclient import TestClient
 
 from cdx_rocks import index, server
+from cdx_rocks.report import ReportCounter
 
 # conftest.py mocks zstd.open; grab the original that conftest saved.
 _orig_zstd_open = sys.modules["tests.conftest"]._orig_zstd_open  # type: ignore[attr-defined]
@@ -286,3 +287,78 @@ def test_health_endpoint_not_ready():
     resp = client.get("/health")
     assert resp.status_code == 503
     assert "not ready" in resp.json()["detail"].lower()
+
+
+def test_query_index_scan_cap():
+    """A request examines at most MAX_SCAN_KEYS keys (availability)."""
+    n = index.MAX_SCAN_KEYS * 2
+    items: dict[bytes, bytes] = {}
+    for i in range(n):
+        items[_make_key(f"https://example.com/p{i:04d}", f"20260101{i:010d}")] = _make_value(1, i, 10)
+
+    class CountingDB:
+        """Sorted items that count how many keys the query loop consumed."""
+
+        def __init__(self, items: list[tuple[bytes, bytes]]) -> None:
+            self._items = items
+            self.iterations = 0
+
+        def items(self, from_key: bytes | None = None):
+            if from_key is None:
+                seq = self._items
+            else:
+                seq = [(k, v) for k, v in self._items if k >= from_key]
+            for item in seq:
+                self.iterations += 1
+                yield item
+
+        def close(self) -> None:
+            pass
+
+    db = CountingDB(sorted(items.items()))
+    server.app.state.db = db
+    server.app.state.catalog = {1: "/data/w.warc.gz"}
+    try:
+        _surt, results = index.query_index(
+            server.app, "https://example.com", exact_match=False, at="20260101000000", limit=5
+        )
+        assert db.iterations <= index.MAX_SCAN_KEYS
+        assert len(results) <= 5
+    finally:
+        _clear_state()
+
+
+def test_lookup_surt_key_precheck_skips_seek(monkeypatch: pytest.MonkeyPatch):
+    """key=surt with a host missing from the report returns empty without
+    touching the DB, even when the DB would have had matches."""
+    items = {_make_key("https://other.org/news", "20260801000000"): _make_value(1, 0, 100)}
+    _setup_state(MockRdict(items), {1: "/data/w.warc.gz"})
+    report = ReportCounter()
+    report.patterns = {"com": 1, "com,example": 1}
+    monkeypatch.setattr(server, "SURT_REPORT_CACHE", report)
+
+    client = TestClient(server.app)
+    resp = client.get("/cdx-index/lookup", params={"url": "org,other", "key": "surt"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_results"] == 0
+    assert body["results"] == []
+    _clear_state()
+
+
+def test_lookup_surt_key_path_suffix_checks_host(monkeypatch: pytest.MonkeyPatch):
+    """A path-suffixed key is pre-checked by its host part, so the seek runs."""
+    items = {_make_key("https://example.com/page", "20260801120000"): _make_value(1, 0, 500)}
+    _setup_state(MockRdict(items), {1: "/data/w.warc.gz"})
+    report = ReportCounter()
+    report.patterns = {"com": 1, "com,example": 1}
+    monkeypatch.setattr(server, "SURT_REPORT_CACHE", report)
+
+    client = TestClient(server.app)
+    resp = client.get(
+        "/cdx-index/lookup",
+        params={"url": "com,example)/page", "key": "surt", "exact": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["total_results"] == 1
+    _clear_state()

@@ -6,8 +6,8 @@ from typing import cast
 from cdx_rocks.report import (
     REPORT_FILENAME,
     ReportCounter,
+    SurtTree,
     load_report,
-    looks_like_surt,
     surt_browse,
     surt_host_patterns,
     write_report,
@@ -164,25 +164,50 @@ class TestReportFile:
         assert loaded.total_entries == 0
 
 
-class TestLooksLikeSurt:
-    """Verify URL vs SURT key auto-detection."""
+class TestSurtTree:
+    """The precomputed tree must agree with surt_browse at every depth."""
 
-    def test_surt_forms_detected(self):
-        assert looks_like_surt("com,example")
-        assert looks_like_surt("com,yahoo,news")
-        assert looks_like_surt("com,example)/page1")
-        assert looks_like_surt("82,2,237,15)")
+    REPORT = {
+        "total_entries": 7,
+        "patterns": {
+            "com": 3,
+            "com,example": 2,
+            "com,desample": 1,
+            "org": 1,
+            "org,other": 1,
+            "org,deep": 0,  # zero-count entries can exist; order by count desc
+            "82,2,237,15": 2,  # dotted-IP host: only the full host is counted
+        },
+    }
 
-    def test_urls_not_detected(self):
-        assert not looks_like_surt("https://example.com/page1")
-        assert not looks_like_surt("http://www.yahoo.com/")
-        assert not looks_like_surt("example.com/page1")
-        assert not looks_like_surt("com")
-        assert not looks_like_surt("")
+    def _tree(self) -> SurtTree:
+        counter = ReportCounter.from_dict(self.REPORT)
+        return SurtTree(counter.total_entries, counter.patterns)
 
-    def test_scheme_wins_over_comma(self):
-        # A URL with a comma in the path still has a scheme, so stays a URL
-        assert not looks_like_surt("https://en.wikipedia.org/wiki/A,_B")
+    def test_matches_surt_browse_at_every_depth(self):
+        tree = self._tree()
+        for pattern in ["", "com", "com,example", "com,desample", "org", "org,other", "org,deep", "net", "82,2,237,15"]:
+            assert tree.hop(pattern) == surt_browse(pattern, self.REPORT)
+
+    def test_matches_surt_browse_with_limit(self):
+        tree = self._tree()
+        assert tree.hop("", limit=1) == surt_browse("", self.REPORT, limit=1)
+        assert tree.hop("com", limit=1) == surt_browse("com", self.REPORT, limit=1)
+
+    def test_orphan_numeric_host_promoted_to_root(self):
+        tree = self._tree()
+        children = cast("dict[str, int]", tree.hop("")["children"])
+        assert "82,2,237,15" in children
+
+    def test_children_sorted_count_desc(self):
+        tree = self._tree()
+        children = cast("dict[str, int]", tree.hop("")["children"])
+        assert list(children) == ["com", "82,2,237,15", "org"]
+
+    def test_unknown_pattern_has_no_children(self):
+        tree = self._tree()
+        assert tree.hop("net")["children"] == {}
+        assert tree.hop("net")["count"] == 0
 
 
 class TestSurtBrowse:

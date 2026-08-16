@@ -36,7 +36,7 @@ def surt_host_patterns(surt_url: str) -> list[str]:
     """Return the label-prefix patterns one SURT entry contributes to.
 
     The host part is everything before the first ``)``. Labels are split on
-    ``","``. If every label is numeric, only the full host is returned.
+    ``,``. If every label is numeric, only the full host is returned.
     """
     host = surt_url.split(")", 1)[0]
     labels = [label for label in host.split(",") if label]
@@ -50,19 +50,6 @@ def surt_host_patterns(surt_url: str) -> list[str]:
         acc = f"{acc},{label}" if acc else label
         patterns.append(acc)
     return patterns
-
-
-def looks_like_surt(value: str) -> bool:
-    """Heuristic: does *value* look like a SURT key rather than a URL?
-
-    SURT hosts join their labels with commas (``com,example``) whereas a
-    URL's host never contains a comma. A value with at least one comma and
-    no ``://`` scheme is treated as a SURT key; anything else is treated as
-    a URL. A single-label host such as ``com`` has no comma and so is
-    treated as a URL — pass ``key=surt`` explicitly to force SURT handling.
-    A full SURT key with a path (``com,example)/page``) is also detected.
-    """
-    return "," in value and "://" not in value
 
 
 class ReportCounter:
@@ -147,6 +134,56 @@ def surt_browse(pattern: str, report: dict[str, object], limit: int = 50) -> dic
         "children": dict(ordered[:limit]),
         "total_children": len(ordered),
     }
+
+
+class SurtTree:
+    """In-memory SURT host tree, built once from a report.
+
+    Precomputes the parent -> children map so each browse request is a dict
+    lookup plus an O(limit) slice, instead of an O(N) scan over every pattern
+    in the report (N is ~150k patterns on the largest index).
+
+    Mirrors ``surt_browse`` semantics exactly, including the promotion of
+    dotted-IP hosts (whose parent was never counted) to the root.
+    """
+
+    def __init__(self, total_entries: int, patterns: dict[str, int]) -> None:
+        self.total_entries = total_entries
+        self.patterns = patterns
+        self.children: dict[str, list[tuple[str, int]]] = {}
+        self._build()
+
+    def _build(self) -> None:
+        """Group patterns by parent and pre-sort each children list."""
+        groups: dict[str, list[str]] = {}
+        for name in self.patterns:
+            parent = name.rsplit(",", 1)[0] if "," in name else ""
+            groups.setdefault(parent, []).append(name)
+
+        # Promote orphans (dotted-IP hosts whose parent was never counted)
+        # to the root so they stay reachable.
+        root = groups.setdefault("", [])
+        for parent in list(groups):
+            if parent and parent not in self.patterns:
+                root.extend(groups[parent])
+                del groups[parent]
+
+        for parent, names in groups.items():
+            names.sort(key=lambda n: (-self.patterns[n], n))
+            self.children[parent] = [(n, self.patterns[n]) for n in names]
+
+    def hop(self, pattern: str, limit: int = 50) -> dict[str, object]:
+        """One hop down the tree: the pattern's count plus its direct children.
+
+        Returns the same shape as ``surt_browse``.
+        """
+        kids = self.children.get(pattern, [])
+        return {
+            "pattern": pattern,
+            "count": self.patterns.get(pattern, 0),
+            "children": dict(kids[:limit]),
+            "total_children": len(kids),
+        }
 
 
 def load_report(path: str | Path) -> ReportCounter:

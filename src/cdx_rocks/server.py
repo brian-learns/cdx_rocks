@@ -17,7 +17,7 @@ from rocksdict import AccessType, DBCompressionType, Options, Rdict
 
 from cdx_rocks.config import resolve_catalog_path, resolve_manifest_path, resolve_rocks_dir, resolve_struct_format
 from cdx_rocks.index import query_index
-from cdx_rocks.report import REPORT_FILENAME, looks_like_surt, surt_browse
+from cdx_rocks.report import REPORT_FILENAME, ReportCounter, SurtTree
 from cdx_rocks.schema import validate_struct_format as _validate_struct_format
 from cdx_rocks.shadow import get_rocks_dir
 
@@ -44,6 +44,32 @@ CATALOG_PATH = resolve_catalog_path()
 _MANIFEST_PATH = resolve_manifest_path()
 SURT_REPORT_PATH = (
     (_MANIFEST_PATH.parent / REPORT_FILENAME) if _MANIFEST_PATH else Path(ROCKSDB_DIR).parent / REPORT_FILENAME
+)
+
+
+def _load_surt_report() -> ReportCounter | None:
+    """Parse ``surt_report.json`` tolerantly, or return ``None``.
+
+    ``None`` means the report is absent (index built before the SURT report
+    feature) or unreadable/corrupt — both are treated as "no report", so a
+    bad file can never 500 the API.
+    """
+    try:
+        data = json.loads(SURT_REPORT_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
+        return ReportCounter.from_dict(data)
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+# The report and its in-memory tree are loaded ONCE at import time. The
+# index directory is frozen for the life of the process (loading a new index
+# requires a restart), so no invalidation is needed. Tests may replace
+# SURT_REPORT_CACHE / SURT_TREE via monkeypatch.
+SURT_REPORT_CACHE: ReportCounter | None = _load_surt_report()
+SURT_TREE: SurtTree | None = (
+    SurtTree(SURT_REPORT_CACHE.total_entries, SURT_REPORT_CACHE.patterns) if SURT_REPORT_CACHE is not None else None
 )
 
 API_VERSION = "0.6.0"
@@ -212,14 +238,14 @@ async def health():
 # --- FastAPI Route ---
 @api_router.get("/lookup", response_model=LookupResponse)
 async def lookup_endpoint(
-    url: Annotated[str, Query(description="URL to look for in the archive, or a literal SURT key (see key)")],
+    url: Annotated[str, Query(description="URL to look for in the archive, or (with key=surt) a literal SURT key")],
     key: Annotated[
         Literal["url", "surt"],
         Query(
             description=(
-                "How to read the url parameter. 'url' (default): parse as a URL — unless it "
-                "already looks like a SURT key (has commas and no scheme), in which case it is "
-                "used verbatim. 'surt': always treat url as a literal SURT key."
+                "How to read the url parameter. 'url' (default): parse as a URL. "
+                "'surt': use url verbatim as a literal SURT key, e.g. a host pattern "
+                "copied from /cdx-index/surt."
             )
         ),
     ] = "url",
@@ -234,19 +260,39 @@ async def lookup_endpoint(
 ):
     """REST API endpoint supporting exact, partial prefix, or timestamp-targeted matching.
 
-    Accepts URLs (``http://www.yahoo.com/``) or literal SURT keys
-    (``com,yahoo,news`` — e.g. copied from ``/cdx-index/surt``). SURT-looking
-    input (commas, no scheme) is auto-detected; force it with ``key=surt``.
+    With ``key=surt`` the ``url`` parameter is used verbatim as a literal
+    SURT key (e.g. ``com,yahoo,news`` — copied from ``/cdx-index/surt``).
+    Keys whose host was never indexed (not in ``surt_report.json``) return
+    an empty result without touching RocksDB.
     """
-    as_surt_key = key == "surt" or looks_like_surt(url)
+    as_surt_key = key == "surt"
+    if as_surt_key and SURT_REPORT_CACHE is not None:
+        # Pre-check: the report lists every host pattern in the index, so a
+        # key whose host was never indexed is guaranteed to have no captures.
+        # Skip the RocksDB seek and return the same empty result any miss
+        # would (never 404). Path suffixes (com,example)/page1) are not in
+        # the report — the host part (before the first ')') is what is checked.
+        host_part = url.split(")", 1)[0]
+        if url not in SURT_REPORT_CACHE.patterns and host_part not in SURT_REPORT_CACHE.patterns:
+            return {
+                "query_url": url,
+                "surt_prefix": url,
+                "exact_match": exact,
+                "at_timestamp": at,
+                "total_results": 0,
+                "limit": limit,
+                "results": [],
+            }
     try:
         surt_prefix, captures = query_index(
             app, url, exact_match=exact, limit=limit, at=at, surt_key=url if as_surt_key else None
         )
     except ValueError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.exception("Lookup failed (url=%r key=%r)", url, key)
+        raise HTTPException(status_code=500, detail="Lookup failed: internal index error.") from e
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Malformed URL payload: {e!s}") from e
+        logger.exception("Malformed lookup request (url=%r key=%r)", url, key)
+        raise HTTPException(status_code=400, detail="Malformed lookup request.") from e
 
     return {
         "query_url": url,
@@ -275,15 +321,6 @@ async def extent_endpoint():
     }
 
 
-def _load_surt_report() -> dict[str, object] | None:
-    """Read surt_report.json from the index directory, or None if absent/corrupt."""
-    try:
-        data = json.loads(SURT_REPORT_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
 @api_router.get("/surt", response_model=SurtBrowseResponse)
 async def surt_browse_endpoint(
     pattern: Annotated[
@@ -303,18 +340,17 @@ async def surt_browse_endpoint(
     walked level by level until a leaf host. Counts are entry totals from
     ``surt_report.json`` (build + updates), not unique URLs.
     """
-    report = _load_surt_report()
-    if report is None:
+    if SURT_TREE is None:
         raise HTTPException(
             status_code=404,
-            detail="No surt_report.json in the index directory (index built before the SURT report feature).",
+            detail="No surt_report.json in the index directory (index built before the SURT report feature, or the report is unreadable).",
         )
 
-    result = surt_browse(pattern, report, limit=limit)
+    result = SURT_TREE.hop(pattern, limit=limit)
     return {
         "pattern": result["pattern"],
         "count": result["count"],
-        "total_entries": report.get("total_entries", 0),
+        "total_entries": SURT_TREE.total_entries,
         "children": result["children"],
         "total_children": result["total_children"],
     }
