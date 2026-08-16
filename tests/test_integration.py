@@ -93,6 +93,18 @@ def test_build_and_query_roundtrip(tmp_path: Path):
     assert (output_dir / "extent.json").is_file(), "Extent not written"
     assert (output_dir / "rocks").is_dir(), "RocksDB directory not created"
 
+    # SURT host-pattern report written with correct counts
+    report_path = output_dir / "surt_report.json"
+    assert report_path.is_file(), "surt_report.json not written"
+    report = json.loads(report_path.read_text())
+    assert report["total_entries"] == 3
+    assert report["patterns"] == {
+        "com": 2,
+        "com,example": 2,
+        "org": 1,
+        "org,other": 1,
+    }
+
     # Step 3: Open the real DB and catalog
     opts = Options(raw_mode=True)
     db = Rdict(str(output_dir / "rocks"), options=opts, access_type=AccessType.read_only())
@@ -242,6 +254,97 @@ def test_update_adds_records(tmp_path: Path):
     finally:
         db.close()
         _clear_state()
+
+
+def test_update_merges_surt_report(tmp_path: Path):
+    """Verify the update loads the existing report and merges new counts."""
+    from cdx_rocks.update import update_index
+
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir1 = tmp_path / "cdxj1"
+    cdxj_dir1.mkdir(parents=True)
+
+    # Build initial index (com,example x2, org,other x1)
+    _make_cdxj(cdxj_dir1, test_catalog)
+    build_index(str(cdxj_dir1), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    report_path = output_dir / "surt_report.json"
+    report_before = json.loads(report_path.read_text())
+    assert report_before["total_entries"] == 3
+
+    # Second CDXJ with a different domain
+    name_to_id = build.load_catalog(str(test_catalog))
+    filenames = list(name_to_id.keys())
+    cdxj_file2 = tmp_path / "extra.cdxj.zst"
+    cctx = zstd.ZstdCompressor(level=1)
+    with open(cdxj_file2, "wb") as fout:
+        with cctx.stream_writer(fout) as writer:
+            text_writer = io.TextIOWrapper(writer, encoding="utf-8")
+            meta = json.dumps({
+                "filename": filenames[3],
+                "offset": 5000,
+                "length": 1200,
+                "offset_in_warc": 5000,
+                "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
+            })
+            surt_str = surt.surt("https://newsite.com/article")
+            text_writer.write(f"{surt_str} 20260301100000 {meta}\n")
+            text_writer.flush()
+
+    update_index(str(cdxj_file2), str(test_catalog), str(output_dir))
+
+    # Merged report: old counts preserved, new domain added
+    report = json.loads(report_path.read_text())
+    assert report["total_entries"] == 4
+    assert report["patterns"] == {
+        "com": 3,
+        "com,example": 2,
+        "com,newsite": 1,
+        "org": 1,
+        "org,other": 1,
+    }
+
+
+def test_update_report_without_prior_report(tmp_path: Path):
+    """An update with no existing report file starts one fresh."""
+    from cdx_rocks.update import update_index
+
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir = tmp_path / "cdxj"
+    cdxj_dir.mkdir(parents=True)
+
+    _make_cdxj(cdxj_dir, test_catalog)
+    build_index(str(cdxj_dir), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    # Remove the report to simulate an index built before this feature existed
+    (output_dir / "surt_report.json").unlink()
+
+    # Update with a duplicate-free second file
+    name_to_id = build.load_catalog(str(test_catalog))
+    filenames = list(name_to_id.keys())
+    cdxj_file2 = tmp_path / "extra.cdxj.zst"
+    cctx = zstd.ZstdCompressor(level=1)
+    with open(cdxj_file2, "wb") as fout:
+        with cctx.stream_writer(fout) as writer:
+            text_writer = io.TextIOWrapper(writer, encoding="utf-8")
+            meta = json.dumps({
+                "filename": filenames[3],
+                "offset": 5000,
+                "length": 1200,
+                "offset_in_warc": 5000,
+                "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
+            })
+            surt_str = surt.surt("https://newsite.com/article")
+            text_writer.write(f"{surt_str} 20260301100000 {meta}\n")
+            text_writer.flush()
+
+    update_index(str(cdxj_file2), str(test_catalog), str(output_dir))
+
+    report = json.loads((output_dir / "surt_report.json").read_text())
+    assert report["total_entries"] == 1
+    assert report["patterns"] == {"com": 1, "com,newsite": 1}
 
 
 def test_lookup_endpoint_after_real_build(tmp_path: Path):

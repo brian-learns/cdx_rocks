@@ -24,6 +24,7 @@ from pathlib import Path
 import zstandard as zstd
 from rocksdict import DBCompactionStyle, DBCompressionType, Options, Rdict, WriteBatch
 
+from cdx_rocks.report import REPORT_FILENAME, ReportCounter, write_report
 from cdx_rocks.schema import safe_pack, validate_struct_format
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ def build_index(
     dctx = zstd.ZstdDecompressor()
     total_records = 0
     total_dups = 0
+    report = ReportCounter()
 
     cdxj_files = sorted(f for f in os.listdir(cdxj_dir) if f.endswith(".cdxj.zst"))
     logger.info("Found %d CDXJ files.", len(cdxj_files))
@@ -128,6 +130,7 @@ def build_index(
                         packed = safe_pack(struct_format, warc_id, offset, length)
                         batch.put(compound_key, packed)
                         last_key = compound_key
+                        report.record(surt_url)
                         file_records += 1
                         total_records += 1
 
@@ -183,6 +186,10 @@ def build_index(
 
     extent_path = Path(output_dir) / "extent.json"
     extent_path.write_text(json.dumps(extent, indent=2) + "\n")
+
+    # Write surt_report.json (host label-prefix statistics)
+    report_path = Path(output_dir) / REPORT_FILENAME
+    write_report(report_path, report)
 
     logger.info(
         "Index built: %d records, %d duplicates dropped, %d WARC files, manifest at %s, extent at %s",
