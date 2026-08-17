@@ -379,8 +379,12 @@ async def surt_prefix_endpoint(
         }
     try:
         _, captures = query_index(
-            app, "", exact_match=False, limit=limit,
-            surt_key=prefix, host_boundary=")" not in prefix,
+            app,
+            "",
+            exact_match=False,
+            limit=limit,
+            surt_key=prefix,
+            host_boundary=")" not in prefix,
         )
     except ValueError as e:
         logger.exception("Surt prefix scan failed (prefix=%r)", prefix)

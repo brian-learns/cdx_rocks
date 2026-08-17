@@ -365,17 +365,23 @@ class TestQueryIndexHostBoundary:
             _make_key("https://sub.aa.example.com/y", "20200102000000"): _make_value(0, 2, 10),
             _make_key("https://aaace.example.com/z", "20200103000000"): _make_value(0, 3, 10),
         }
+
     # SURT keys: com,example,aa)/x   com,example,aa,sub)/y   com,example,aaace)/z
 
     def test_host_boundary_excludes_sibling(self):
         _setup_state(MockRdict(self._items()), {0: "warc0"})
         try:
             _, results = index.query_index(
-                server.app, "", exact_match=False, limit=10,
-                surt_key="com,example,aa", host_boundary=True,
+                server.app,
+                "",
+                exact_match=False,
+                limit=10,
+                surt_key="com,example,aa",
+                host_boundary=True,
             )
             assert {r["surt_key"].split(")")[0] for r in results} == {
-                "com,example,aa", "com,example,aa,sub",
+                "com,example,aa",
+                "com,example,aa,sub",
             }
         finally:
             _clear_state()
@@ -384,7 +390,10 @@ class TestQueryIndexHostBoundary:
         _setup_state(MockRdict(self._items()), {0: "warc0"})
         try:
             _, results = index.query_index(
-                server.app, "", exact_match=False, limit=10,
+                server.app,
+                "",
+                exact_match=False,
+                limit=10,
                 surt_key="com,example,aa",
             )
             assert len(results) == 3  # legacy raw string-prefix behavior unchanged
@@ -396,8 +405,12 @@ class TestQueryIndexHostBoundary:
         try:
             # Prefix containing ')' is a plain string-prefix scan; the flag is ignored.
             _, results = index.query_index(
-                server.app, "", exact_match=False, limit=10,
-                surt_key="com,example,aa)", host_boundary=True,
+                server.app,
+                "",
+                exact_match=False,
+                limit=10,
+                surt_key="com,example,aa)",
+                host_boundary=True,
             )
             assert {r["surt_key"].split(")")[0] for r in results} == {"com,example,aa"}
         finally:

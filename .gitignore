@@ -11,3 +11,8 @@ wheels/
 
 rocksdb_*
 all_warc_paths.txt.zst
+
+# Editor + agent scratch
+*.swp
+.hermes/plans/
+.hermes/security_review_plan.md

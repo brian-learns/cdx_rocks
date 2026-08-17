@@ -42,13 +42,15 @@ def _make_cdxj(tmp_path: Path, catalog_path: Path) -> Path:
             text_writer = io.TextIOWrapper(writer, encoding="utf-8")
             for url, ts, filename, offset, length in records:
                 surt_str = surt.surt(url)
-                meta = json.dumps({
-                    "filename": filename,
-                    "offset": offset,
-                    "length": length,
-                    "offset_in_warc": offset,
-                    "warcproxycdxline": f"WARC/1.0 {url} {ts}",
-                })
+                meta = json.dumps(
+                    {
+                        "filename": filename,
+                        "offset": offset,
+                        "length": length,
+                        "offset_in_warc": offset,
+                        "warcproxycdxline": f"WARC/1.0 {url} {ts}",
+                    }
+                )
                 text_writer.write(f"{surt_str} {ts} {meta}\n")
             text_writer.flush()
 
@@ -118,9 +120,7 @@ def test_build_and_query_roundtrip(tmp_path: Path):
     server.app.state.catalog = id_to_path
 
     try:
-        surt_prefix, results = index.query_index(
-            server.app, "https://example.com/page1", exact_match=True
-        )
+        surt_prefix, results = index.query_index(server.app, "https://example.com/page1", exact_match=True)
         assert surt_prefix == "com,example)/page1"
         assert len(results) == 2
         assert results[0]["timestamp"] == "20260101120000"
@@ -132,9 +132,7 @@ def test_build_and_query_roundtrip(tmp_path: Path):
         assert results[1]["length"] == 800
 
         # Query the other domain
-        _surt, other_results = index.query_index(
-            server.app, "https://other.org/news", exact_match=True
-        )
+        _surt, other_results = index.query_index(server.app, "https://other.org/news", exact_match=True)
         assert len(other_results) == 1
         assert other_results[0]["timestamp"] == "20260201090000"
         assert other_results[0]["offset"] == 1400
@@ -208,13 +206,15 @@ def test_update_adds_records(tmp_path: Path):
     with open(cdxj_file2, "wb") as fout:
         with cctx.stream_writer(fout) as writer:
             text_writer = io.TextIOWrapper(writer, encoding="utf-8")
-            meta = json.dumps({
-                "filename": filenames[3],
-                "offset": 5000,
-                "length": 1200,
-                "offset_in_warc": 5000,
-                "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
-            })
+            meta = json.dumps(
+                {
+                    "filename": filenames[3],
+                    "offset": 5000,
+                    "length": 1200,
+                    "offset_in_warc": 5000,
+                    "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
+                }
+            )
             surt_str = surt.surt("https://newsite.com/article")
             text_writer.write(f"{surt_str} 20260301100000 {meta}\n")
             text_writer.flush()
@@ -239,15 +239,11 @@ def test_update_adds_records(tmp_path: Path):
 
     try:
         # Old records still queryable
-        _surt, results = index.query_index(
-            server.app, "https://example.com/page1", exact_match=True
-        )
+        _surt, results = index.query_index(server.app, "https://example.com/page1", exact_match=True)
         assert len(results) == 2
 
         # New record is present
-        _surt, new_results = index.query_index(
-            server.app, "https://newsite.com/article", exact_match=True
-        )
+        _surt, new_results = index.query_index(server.app, "https://newsite.com/article", exact_match=True)
         assert len(new_results) == 1
         assert new_results[0]["timestamp"] == "20260301100000"
         assert new_results[0]["offset"] == 5000
@@ -283,13 +279,15 @@ def test_update_merges_surt_report(tmp_path: Path):
     with open(cdxj_file2, "wb") as fout:
         with cctx.stream_writer(fout) as writer:
             text_writer = io.TextIOWrapper(writer, encoding="utf-8")
-            meta = json.dumps({
-                "filename": filenames[3],
-                "offset": 5000,
-                "length": 1200,
-                "offset_in_warc": 5000,
-                "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
-            })
+            meta = json.dumps(
+                {
+                    "filename": filenames[3],
+                    "offset": 5000,
+                    "length": 1200,
+                    "offset_in_warc": 5000,
+                    "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
+                }
+            )
             surt_str = surt.surt("https://newsite.com/article")
             text_writer.write(f"{surt_str} 20260301100000 {meta}\n")
             text_writer.flush()
@@ -331,13 +329,15 @@ def test_update_report_without_prior_report(tmp_path: Path):
     with open(cdxj_file2, "wb") as fout:
         with cctx.stream_writer(fout) as writer:
             text_writer = io.TextIOWrapper(writer, encoding="utf-8")
-            meta = json.dumps({
-                "filename": filenames[3],
-                "offset": 5000,
-                "length": 1200,
-                "offset_in_warc": 5000,
-                "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
-            })
+            meta = json.dumps(
+                {
+                    "filename": filenames[3],
+                    "offset": 5000,
+                    "length": 1200,
+                    "offset_in_warc": 5000,
+                    "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
+                }
+            )
             surt_str = surt.surt("https://newsite.com/article")
             text_writer.write(f"{surt_str} 20260301100000 {meta}\n")
             text_writer.flush()
@@ -568,11 +568,15 @@ def test_surt_prefix_host_boundary_excludes_sibling(tmp_path: Path, monkeypatch:
             text_writer = io.TextIOWrapper(writer, encoding="utf-8")
             for url, ts, filename, offset, length in records:
                 surt_str = surt.surt(url)
-                meta = json.dumps({
-                    "filename": filename, "offset": offset, "length": length,
-                    "offset_in_warc": offset,
-                    "warcproxycdxline": f"WARC/1.0 {url} {ts}",
-                })
+                meta = json.dumps(
+                    {
+                        "filename": filename,
+                        "offset": offset,
+                        "length": length,
+                        "offset_in_warc": offset,
+                        "warcproxycdxline": f"WARC/1.0 {url} {ts}",
+                    }
+                )
                 text_writer.write(f"{surt_str} {ts} {meta}\n")
             text_writer.flush()
 

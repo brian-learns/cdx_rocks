@@ -78,11 +78,14 @@ class TestBuildManifest:
     def test_manifest_structure(self, tmp_path):
         """Manifest has the correct tag and fields."""
         manifest_path = tmp_path / "cdx-rocks.json"
-        manifest = ["cdx-rocks", {
-            "catalog": "all_warc_paths.txt.zst",
-            "db": "rocks/",
-            "struct_format": "!HQI",
-        }]
+        manifest = [
+            "cdx-rocks",
+            {
+                "catalog": "all_warc_paths.txt.zst",
+                "db": "rocks/",
+                "struct_format": "!HQI",
+            },
+        ]
         manifest_path.write_text(json.dumps(manifest) + "\n")
 
         data = json.loads(manifest_path.read_text())
