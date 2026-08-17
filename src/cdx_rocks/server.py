@@ -7,7 +7,7 @@ import tempfile
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 from pathlib import Path
-from typing import Annotated, Literal, cast, override
+from typing import Annotated, cast, override
 
 import zstandard as zstd
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
@@ -241,17 +241,7 @@ async def health():
 # --- FastAPI Route ---
 @api_router.get("/lookup", response_model=LookupResponse)
 async def lookup_endpoint(
-    url: Annotated[str, Query(description="URL to look for in the archive, or (with key=surt) a literal SURT key")],
-    key: Annotated[
-        Literal["url", "surt"],
-        Query(
-            description=(
-                "How to read the url parameter. 'url' (default): parse as a URL. "
-                "'surt': use url verbatim as a literal SURT key, e.g. a host pattern "
-                "copied from /cdx-index/surt."
-            )
-        ),
-    ] = "url",
+    url: Annotated[str, Query(description="URL to look for in the archive")],
     exact: Annotated[bool, Query(description="Exact matching vs prefix matching")] = False,
     at: Annotated[
         str | None,
@@ -263,38 +253,17 @@ async def lookup_endpoint(
 ):
     """REST API endpoint supporting exact, partial prefix, or timestamp-targeted matching.
 
-    With ``key=surt`` the ``url`` parameter is used verbatim as a literal
-    SURT key (e.g. ``com,yahoo,news`` — copied from ``/cdx-index/surt``).
-    Keys whose host was never indexed (not in ``surt_report.json``) return
-    an empty result without touching RocksDB.
+    ``url`` is always parsed as a URL. For literal SURT keys (e.g. a host
+    pattern copied from ``/cdx-index/surt-browse``) use
+    ``/cdx-index/surt-prefix`` instead.
     """
-    as_surt_key = key == "surt"
-    if as_surt_key and SURT_REPORT_CACHE is not None:
-        # Pre-check: the report lists every host pattern in the index, so a
-        # key whose host was never indexed is guaranteed to have no captures.
-        # Skip the RocksDB seek and return the same empty result any miss
-        # would (never 404). Path suffixes (com,example)/page1) are not in
-        # the report — the host part (before the first ')') is what is checked.
-        host_part = url.split(")", 1)[0]
-        if url not in SURT_REPORT_CACHE.patterns and host_part not in SURT_REPORT_CACHE.patterns:
-            return {
-                "query_url": url,
-                "surt_prefix": url,
-                "exact_match": exact,
-                "at_timestamp": at,
-                "total_results": 0,
-                "limit": limit,
-                "results": [],
-            }
     try:
-        surt_prefix, captures = query_index(
-            app, url, exact_match=exact, limit=limit, at=at, surt_key=url if as_surt_key else None
-        )
+        surt_prefix, captures = query_index(app, url, exact_match=exact, limit=limit, at=at)
     except ValueError as e:
-        logger.exception("Lookup failed (url=%r key=%r)", url, key)
+        logger.exception("Lookup failed (url=%r)", url)
         raise HTTPException(status_code=500, detail="Lookup failed: internal index error.") from e
     except Exception as e:
-        logger.exception("Malformed lookup request (url=%r key=%r)", url, key)
+        logger.exception("Malformed lookup request (url=%r)", url)
         raise HTTPException(status_code=400, detail="Malformed lookup request.") from e
 
     return {

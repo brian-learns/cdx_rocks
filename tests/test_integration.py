@@ -599,8 +599,8 @@ def test_surt_prefix_host_boundary_excludes_sibling(tmp_path: Path, monkeypatch:
         _clear_state()
 
 
-def test_lookup_accepts_surt_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """/lookup accepts a literal SURT key only with key=surt (no auto-detect)."""
+def test_lookup_is_url_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """/lookup parses url as a URL only — the SURT-key mode is gone."""
     test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
     output_dir = tmp_path / "output"
     cdxj_dir = tmp_path / "cdxj"
@@ -615,66 +615,26 @@ def test_lookup_accepts_surt_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     server.app.state.db = db
     server.app.state.catalog = id_to_path
 
-    # Give the server the index's report so the key=surt pre-check runs
-    counter = load_report(output_dir / "surt_report.json")
-    monkeypatch.setattr(server, "SURT_REPORT_CACHE", counter)
+    # SURT_REPORT_CACHE is irrelevant to /lookup now; clear it to prove it.
+    monkeypatch.setattr(server, "SURT_REPORT_CACHE", None)
 
     try:
         client = TestClient(server.app)
 
-        # No key param: the string is parsed as a URL, not a SURT key.
-        # surt.surt("com,example") -> "com,example)/" (root path) — a
-        # different prefix than the raw key. (Auto-detection was removed.)
+        # A SURT-looking string is parsed as a URL, not used as a literal key.
+        # surt.surt("com,example") -> "com,example)/" (root path).
         resp = client.get("/cdx-index/lookup", params={"url": "com,example", "exact": False, "limit": 10})
         assert resp.status_code == 200
         body = resp.json()
         assert body["query_url"] == "com,example"
         assert body["surt_prefix"] == "com,example)/"
 
-        # key=surt with a host prefix copied from /cdx-index/surt
+        # A legacy key=surt param is silently ignored (unknown query param).
         resp = client.get("/cdx-index/lookup", params={"url": "com,example", "key": "surt"})
         assert resp.status_code == 200
-        body = resp.json()
-        assert body["surt_prefix"] == "com,example"
-        assert body["total_results"] == 2
-        assert {r["surt_key"] for r in body["results"]} == {"com,example)/page1"}
-        assert {r["offset"] for r in body["results"]} == {100, 600}
+        assert resp.json()["surt_prefix"] == "com,example)/"
 
-        # key=surt with a full SURT key including the path
-        resp = client.get(
-            "/cdx-index/lookup",
-            params={"url": "com,example)/page1", "key": "surt", "exact": True},
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["surt_prefix"] == "com,example)/page1"
-        assert body["total_results"] == 2
-        assert {r["timestamp"] for r in body["results"]} == {"20260101120000", "20260102130000"}
-
-        # key=surt on another host prefix
-        resp = client.get("/cdx-index/lookup", params={"url": "org,other", "key": "surt"})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["total_results"] == 1
-        assert body["results"][0]["surt_key"] == "org,other)/news"
-        assert body["results"][0]["offset"] == 1400
-
-        # key=surt with a host not in the report: the pre-check skips the
-        # RocksDB seek; still 200 with an empty result (never 404).
-        resp = client.get("/cdx-index/lookup", params={"url": "com,nonexistent", "key": "surt"})
-        assert resp.status_code == 200
-        assert resp.json()["total_results"] == 0
-
-        # key=surt with a path suffix: the host (com,example) IS in the
-        # report, so the seek runs and the miss comes back from RocksDB.
-        resp = client.get(
-            "/cdx-index/lookup",
-            params={"url": "com,example)/no-such-page", "key": "surt", "exact": True},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["total_results"] == 0
-
-        # Regression: a plain URL still behaves exactly as before
+        # A real URL still behaves exactly as before
         resp = client.get(
             "/cdx-index/lookup",
             params={"url": "https://example.com/page1", "exact": True},
@@ -683,34 +643,6 @@ def test_lookup_accepts_surt_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         body = resp.json()
         assert body["surt_prefix"] == "com,example)/page1"
         assert body["total_results"] == 2
-    finally:
-        db.close()
-        _clear_state()
-
-
-def test_lookup_surt_key_without_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """key=surt still works on pre-feature indexes (no report, no pre-check)."""
-    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
-    output_dir = tmp_path / "output"
-    cdxj_dir = tmp_path / "cdxj"
-    cdxj_dir.mkdir(parents=True)
-
-    _make_cdxj(cdxj_dir, test_catalog)
-    build_index(str(cdxj_dir), str(test_catalog), str(output_dir), struct_format="!HQI")
-
-    opts = Options(raw_mode=True)
-    db = Rdict(str(output_dir / "rocks"), options=opts, access_type=AccessType.read_only())
-    id_to_path = _load_id_to_path(output_dir / "all_warc_paths.txt.zst")
-    server.app.state.db = db
-    server.app.state.catalog = id_to_path
-
-    monkeypatch.setattr(server, "SURT_REPORT_CACHE", None)
-
-    try:
-        client = TestClient(server.app)
-        resp = client.get("/cdx-index/lookup", params={"url": "com,example", "key": "surt"})
-        assert resp.status_code == 200
-        assert resp.json()["total_results"] == 2
     finally:
         db.close()
         _clear_state()

@@ -9,7 +9,6 @@ import surt
 from fastapi.testclient import TestClient
 
 from cdx_rocks import index, server
-from cdx_rocks.report import ReportCounter
 
 # conftest.py mocks zstd.open; grab the original that conftest saved.
 _orig_zstd_open = sys.modules["tests.conftest"]._orig_zstd_open  # type: ignore[attr-defined]
@@ -328,37 +327,28 @@ def test_query_index_scan_cap():
         _clear_state()
 
 
-def test_lookup_surt_key_precheck_skips_seek(monkeypatch: pytest.MonkeyPatch):
-    """key=surt with a host missing from the report returns empty without
-    touching the DB, even when the DB would have had matches."""
-    items = {_make_key("https://other.org/news", "20260801000000"): _make_value(1, 0, 100)}
+def test_lookup_is_url_only(monkeypatch: pytest.MonkeyPatch):
+    """/lookup treats url as a URL only — no SURT-key mode (use /surt-prefix)."""
+    items = {
+        _make_key("https://example.com/page", "20260801120000"): _make_value(1, 0, 500),
+    }
     _setup_state(MockRdict(items), {1: "/data/w.warc.gz"})
-    report = ReportCounter()
-    report.patterns = {"com": 1, "com,example": 1}
-    monkeypatch.setattr(server, "SURT_REPORT_CACHE", report)
 
     client = TestClient(server.app)
-    resp = client.get("/cdx-index/lookup", params={"url": "org,other", "key": "surt"})
+
+    # A SURT-looking string is parsed as a URL (surt.surt("com,example") -> "com,example)/")
+    resp = client.get("/cdx-index/lookup", params={"url": "com,example"})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["total_results"] == 0
-    assert body["results"] == []
-    _clear_state()
+    assert body["surt_prefix"] == "com,example)/"
 
+    # A legacy key=surt param is silently ignored (unknown query param)
+    resp = client.get("/cdx-index/lookup", params={"url": "com,example", "key": "surt"})
+    assert resp.status_code == 200
+    assert resp.json()["surt_prefix"] == "com,example)/"
 
-def test_lookup_surt_key_path_suffix_checks_host(monkeypatch: pytest.MonkeyPatch):
-    """A path-suffixed key is pre-checked by its host part, so the seek runs."""
-    items = {_make_key("https://example.com/page", "20260801120000"): _make_value(1, 0, 500)}
-    _setup_state(MockRdict(items), {1: "/data/w.warc.gz"})
-    report = ReportCounter()
-    report.patterns = {"com": 1, "com,example": 1}
-    monkeypatch.setattr(server, "SURT_REPORT_CACHE", report)
-
-    client = TestClient(server.app)
-    resp = client.get(
-        "/cdx-index/lookup",
-        params={"url": "com,example)/page", "key": "surt", "exact": True},
-    )
+    # A real URL still resolves normally
+    resp = client.get("/cdx-index/lookup", params={"url": "https://example.com/page", "exact": True})
     assert resp.status_code == 200
     assert resp.json()["total_results"] == 1
     _clear_state()
