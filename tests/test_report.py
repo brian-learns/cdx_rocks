@@ -209,6 +209,34 @@ class TestSurtTree:
         assert tree.hop("net")["children"] == {}
         assert tree.hop("net")["count"] == 0
 
+    def test_hop_offset_skips(self):
+        tree = self._tree()
+        # Root children rank order: com, 82,2,237,15, org
+        first = cast("dict[str, int]", tree.hop("", limit=1, offset=0)["children"])
+        second = cast("dict[str, int]", tree.hop("", limit=1, offset=1)["children"])
+        third = cast("dict[str, int]", tree.hop("", limit=1, offset=2)["children"])
+        assert list(first) == ["com"]
+        assert list(second) == ["82,2,237,15"]
+        assert list(third) == ["org"]
+
+    def test_hop_offset_zero_matches_default(self):
+        tree = self._tree()
+        assert tree.hop("", limit=2, offset=0) == tree.hop("", limit=2)
+        assert tree.hop("com", offset=0) == tree.hop("com")
+
+    def test_hop_offset_past_end_is_empty(self):
+        tree = self._tree()
+        result = tree.hop("", limit=10, offset=999)
+        assert result["children"] == {}
+        assert result["total_children"] == 3  # total still reported
+
+    def test_hop_pages_cover_all_children(self):
+        tree = self._tree()
+        page1 = cast("dict[str, int]", tree.hop("", limit=2, offset=0)["children"])
+        page2 = cast("dict[str, int]", tree.hop("", limit=2, offset=2)["children"])
+        assert len(page1) + len(page2) == tree.hop("")["total_children"]
+        assert set(page1).isdisjoint(page2)
+
 
 class TestSurtBrowse:
     """Verify one-hop tree traversal over a report dict."""

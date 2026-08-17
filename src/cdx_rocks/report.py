@@ -172,16 +172,19 @@ class SurtTree:
             names.sort(key=lambda n: (-self.patterns[n], n))
             self.children[parent] = [(n, self.patterns[n]) for n in names]
 
-    def hop(self, pattern: str, limit: int = 50) -> dict[str, object]:
+    def hop(self, pattern: str, limit: int = 50, offset: int = 0) -> dict[str, object]:
         """One hop down the tree: the pattern's count plus its direct children.
 
-        Returns the same shape as ``surt_browse``.
+        ``offset`` skips the first *offset* children (rank order: count desc,
+        name asc) before ``limit`` is applied. Offsets past the end yield an
+        empty ``children`` dict. Returns the same shape as ``surt_browse``.
         """
         kids = self.children.get(pattern, [])
+        page = kids[offset : offset + limit]
         return {
             "pattern": pattern,
             "count": self.patterns.get(pattern, 0),
-            "children": dict(kids[:limit]),
+            "children": dict(page),
             "total_children": len(kids),
         }
 
