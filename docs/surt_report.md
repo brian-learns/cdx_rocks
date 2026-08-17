@@ -95,10 +95,13 @@ the most common hosts come first.
 
 ## Consumers
 
-The server's `/cdx-index/surt?pattern=<p>&limit=<n>` endpoint returns one hop of the
-tree: `p`'s own count plus its direct children (keys of the form `p,label`), capped
-by `limit`. Each child key is itself a valid `pattern`, so the tree is walked level
-by level until a leaf host. Host prefixes can then be fed straight back into
+The server's `/cdx-index/surt?pattern=<p>&limit=<n>&offset=<o>` endpoint returns one hop of the
+tree: `p`'s own count plus its direct children (keys of the form `p,label`),
+in rank order (count desc, name asc), starting at `offset` and capped by
+`limit`. Each child key is itself a valid `pattern`, so the tree is walked level
+by level until a leaf host; the response's `next_offset` chains to the next
+page (`null` on the last one), so a node with more children than `limit`
+allows can be walked completely. Host prefixes can then be fed straight back into
 `/cdx-index/lookup?url=<pattern>` to retrieve the actual WARC captures.
 
 One quirk: fully numeric hosts have no parent in the report (see above), so the
@@ -109,4 +112,6 @@ even though `rsplit(',', 1)[0]` of the pattern is absent from `patterns`.
 
 See `cdx_rocks/report.py`: `surt_host_patterns()` (per-entry expansion),
 `ReportCounter` (record/merge/serialize), `load_report()` / `write_report()`
-(file I/O), and `surt_browse()` (one hop of tree traversal).
+(file I/O), `SurtTree` (precomputed parent → children map the server uses for
+each hop), and `surt_browse()` (the reference one-hop traversal the tree tests
+assert parity against).

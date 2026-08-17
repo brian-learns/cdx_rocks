@@ -144,9 +144,16 @@ empty result (`total_results: 0`) — no 404.
 |-----------|------|---------|-------------|
 | `pattern` | string | `""` | SURT host pattern to expand (comma-joined labels, e.g. `com` or `com,example`); empty for the root |
 | `limit` | int | 50 | Max children returned (1-200); `total_children` reports the true count |
+| `offset` | int | `0` | Children to skip before `limit` is applied (0-based) |
 
 Each child key in the response is itself a valid `pattern`, so the tree can be
-walked level by level. Counts come from `surt_report.json` (indexed entries,
+walked level by level. Children are returned in rank order (count desc, name
+asc) and the order is stable for the life of a server run (the index is frozen
+until restart). To walk *all* children of a node, follow `next_offset`:
+request, then request again with `offset` set to `next_offset`, until it is
+`null`. Offsets past the end return `200` with an empty `children` — no 404.
+
+Counts come from `surt_report.json` (indexed entries,
 cumulative across build + updates, not unique URLs). Dotted-IP hosts (which
 count only their full host) appear as promoted entries at the root level.
 

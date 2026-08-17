@@ -184,3 +184,13 @@ class SurtBrowseUser(HttpUser):
             name="/surt (redirect)",
             params={"pattern": random.choice(SURT_PATTERNS)},
         )
+
+    @task
+    def surt_browse_paged(self):
+        """Page through root children with offset pagination."""
+        first = self.client.get("/surt", name="/surt (page 1)", params={"limit": 50, "offset": 0})
+        if first.status_code != 200:
+            return
+        next_offset = first.json().get("next_offset")
+        if next_offset is not None:
+            self.client.get("/surt", name="/surt (page 2)", params={"limit": 50, "offset": next_offset})
