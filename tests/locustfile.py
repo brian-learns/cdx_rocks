@@ -1,8 +1,8 @@
 # ruff: noqa: S311  # load test: fast non-cryptographic RNG by design
 """Locust load test for the cdx-index API.
 
-Covers the URL/SURT lookup endpoint, the hierarchical SURT browse endpoint,
-and the legacy top-level redirects.
+Covers the URL lookup endpoint, the SURT prefix (wildcard) scan, the
+hierarchical SURT browse endpoint, and the legacy top-level redirects.
 
 Usage:
     locust -f tests/locustfile.py --headless -u 10 -r 1 --run-time 30s
@@ -25,6 +25,8 @@ from typing import Any
 from locust import HttpUser, between, task
 
 BASE_URL = "http://0.0.0.0:7860/cdx-index"
+# Base without the /cdx-index prefix — used to exercise the top-level redirects.
+ROOT_URL = "http://0.0.0.0:7860"
 URLS_FILE = pathlib.Path(__file__).parent / "1000urls.txt"
 
 # Load test URLs once at import time
@@ -125,17 +127,18 @@ class LookupUser(HttpUser):
         )
 
     @task(1)
-    def lookup_surt_key(self):
-        """Look up a literal SURT key copied from a /surt browse response.
+    def lookup_surt_prefix(self):
+        """Wildcard scan under a host pattern copied from a /surt-browse response.
 
-        key=surt makes the server use the key verbatim (no URL parsing),
-        including single-label hosts that would otherwise parse as URLs.
+        /surt-prefix uses the pattern verbatim as a SURT prefix (no URL
+        parsing), including single-label hosts that would otherwise parse as
+        URLs.
         """
         pattern = random.choice(SURT_PATTERNS)
         self.client.get(
-            "/lookup",
-            name="/lookup (surt)",
-            params={"url": pattern, "key": "surt", "limit": random.randint(1, 10)},
+            "/surt-prefix",
+            name="/surt-prefix",
+            params={"prefix": pattern, "limit": random.randint(1, 10)},
         )
 
 
@@ -149,8 +152,8 @@ class SurtBrowseUser(HttpUser):
     def surt_browse_root(self):
         """List the top-level host labels (root of the tree)."""
         self.client.get(
-            "/surt",
-            name="/surt (root)",
+            "/surt-browse",
+            name="/surt-browse (root)",
             params={"limit": random.randint(10, 200)},
         )
 
@@ -161,8 +164,8 @@ class SurtBrowseUser(HttpUser):
         if "," in pattern:
             pattern = pattern.split(",")[0]
         self.client.get(
-            "/surt",
-            name="/surt (level 1)",
+            "/surt-browse",
+            name="/surt-browse (level 1)",
             params={"pattern": pattern, "limit": random.randint(10, 200)},
         )
 
@@ -171,16 +174,16 @@ class SurtBrowseUser(HttpUser):
         """Expand a deep (multi-label) pattern to its children."""
         pattern = random.choice(SURT_PATTERNS_MULTI)
         self.client.get(
-            "/surt",
-            name="/surt (deep)",
+            "/surt-browse",
+            name="/surt-browse (deep)",
             params={"pattern": pattern, "limit": random.randint(10, 200)},
         )
 
     @task(1)
     def surt_browse_legacy_redirect(self):
-        """Follow the top-level /surt redirect to /cdx-index/surt."""
+        """Follow the top-level /surt redirect to /cdx-index/surt-browse."""
         self.client.get(
-            "/surt",
+            f"{ROOT_URL}/surt",
             name="/surt (redirect)",
             params={"pattern": random.choice(SURT_PATTERNS)},
         )
@@ -188,9 +191,9 @@ class SurtBrowseUser(HttpUser):
     @task
     def surt_browse_paged(self):
         """Page through root children with offset pagination."""
-        first = self.client.get("/surt", name="/surt (page 1)", params={"limit": 50, "offset": 0})
+        first = self.client.get("/surt-browse", name="/surt-browse (page 1)", params={"limit": 50, "offset": 0})
         if first.status_code != 200:
             return
         next_offset = first.json().get("next_offset")
         if next_offset is not None:
-            self.client.get("/surt", name="/surt (page 2)", params={"limit": 50, "offset": next_offset})
+            self.client.get("/surt-browse", name="/surt-browse (page 2)", params={"limit": 50, "offset": next_offset})

@@ -118,7 +118,8 @@ set `CDX_ROCKS` to point to a [cdx-rocks database](https://github.com/brian-lear
 |----------|--------|-------------|
 | `/cdx-index/lookup` | GET | Query CDX index for URL captures |
 | `/cdx-index/extent` | GET | Show indexed WARC file count and date range |
-| `/cdx-index/surt` | GET | Browse the SURT host tree one level at a time |
+| `/cdx-index/surt-browse` | GET | Browse the SURT host tree one level at a time |
+| `/cdx-index/surt-prefix` | GET | Wildcard scan: captures under a SURT prefix |
 | `/health` | GET | Server health check |
 | `/docs` | GET | Swagger/OpenAPI documentation |
 
@@ -126,19 +127,16 @@ set `CDX_ROCKS` to point to a [cdx-rocks database](https://github.com/brian-lear
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `url` | string | (required) | URL to look up in the archive, or (with `key=surt`) a literal SURT key |
-| `key` | string | `url` | `url` or `surt`: how to read `url`. `surt` uses `url` verbatim as a SURT key |
+| `url` | string | (required) | URL to look up in the archive |
 | `exact` | bool | `false` | Exact SURT match vs prefix match |
 | `at` | string | `null` | Timestamp to seek from (YYYYMMDDhhmmss) |
 | `limit` | int | 10 | Max results (1-100) |
 
-SURT keys can be copied straight from `/cdx-index/surt` child keys, e.g.
-`/cdx-index/lookup?url=com,yahoo,news&key=surt`.
+`url` is always parsed as a URL. For literal SURT keys (a host pattern
+copied from `/cdx-index/surt-browse`, or a path prefix) use
+`/cdx-index/surt-prefix` instead.
 
-Keys whose host was never indexed (not in `surt_report.json`) return an
-empty result (`total_results: 0`) — no 404.
-
-### Surt Parameters
+### Surt Browse Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -156,6 +154,19 @@ request, then request again with `offset` set to `next_offset`, until it is
 Counts come from `surt_report.json` (indexed entries,
 cumulative across build + updates, not unique URLs). Dotted-IP hosts (which
 count only their full host) appear as promoted entries at the root level.
+
+### Surt Prefix Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prefix` | string | (required) | SURT prefix to scan. A host pattern (no `)`) such as `com,aa` matches the host and all its subdomains — never sibling hosts like `com,aaa,ace`. A prefix containing `)` such as `com,aaa,ace)/activities` matches that path prefix (wildcard) |
+| `limit` | int | 10 | Max results (1-100) |
+
+Wildcard examples: `http://*.com/` → `prefix=com`;
+`https://ace.aaa.com/activities*` → `prefix=com,aaa,ace)/activities`.
+Results are in key order (SURT, then timestamp); `total_results` is the number
+returned, not a true total. Prefixes whose host was never indexed (not in
+`surt_report.json`) return an empty result (`total_results: 0`) — no 404.
 
 ## Tests
 

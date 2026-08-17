@@ -3,12 +3,12 @@ return to [`cdx-rocks` database definition](./database_definition.md)
 # `surt_report.json`
 
 Optional artifact: statistics over the SURT host labels of every indexed entry.
-It powers the [`/cdx-index/surt`](../README.md#api-endpoints) browse endpoint, which lets
+It powers the [`/cdx-index/surt-browse`](../README.md#api-endpoints) browse endpoint, which lets
 clients explore the index's host tree one label at a time.
 
 `cdx-rocks-build` writes it fresh; `cdx-rocks-update` merges new counts into the
 existing file. Databases built before this artifact existed simply lack it —
-consumers must treat it as optional (the server returns 404 from `/cdx-index/surt`).
+consumers must treat it as optional (the server returns 404 from `/cdx-index/surt-browse`).
 
 ## Format
 
@@ -95,14 +95,16 @@ the most common hosts come first.
 
 ## Consumers
 
-The server's `/cdx-index/surt?pattern=<p>&limit=<n>&offset=<o>` endpoint returns one hop of the
+The server's `/cdx-index/surt-browse?pattern=<p>&limit=<n>&offset=<o>` endpoint returns one hop of the
 tree: `p`'s own count plus its direct children (keys of the form `p,label`),
 in rank order (count desc, name asc), starting at `offset` and capped by
 `limit`. Each child key is itself a valid `pattern`, so the tree is walked level
 by level until a leaf host; the response's `next_offset` chains to the next
 page (`null` on the last one), so a node with more children than `limit`
-allows can be walked completely. Host prefixes can then be fed straight back into
-`/cdx-index/lookup?url=<pattern>` to retrieve the actual WARC captures.
+allows can be walked completely. A host pattern can then be fed into
+`/cdx-index/surt-prefix?prefix=<pattern>` to retrieve the actual WARC captures
+under that host and its subdomains (host-level wildcard search; URL-level
+lookups still go through `/cdx-index/lookup`).
 
 One quirk: fully numeric hosts have no parent in the report (see above), so the
 browse endpoint promotes them to the root level — their entries remain reachable

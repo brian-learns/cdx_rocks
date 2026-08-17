@@ -72,6 +72,6 @@ packed_value = struct.pack(struct_format, absolute_warc_id, offset, length)
 Statistics artifact maintained by the build and update CLIs. It counts every
 SURT host label-prefix seen in the CDXJ input (e.g. `com,example)/page` contributes
 +1 to `"com"` and +1 to `"com,example"`; dotted-IP hosts count only their full host),
-and is the data source for the `/cdx-index/surt` browse endpoint.
+and is the data source for the `/cdx-index/surt-browse` browse endpoint.
 
 Full specification: [`surt_report.md`](./surt_report.md).
