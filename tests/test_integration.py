@@ -487,6 +487,118 @@ def test_surt_root_redirects_to_router_path():
     assert resp.headers["location"] == "/cdx-index/surt?pattern=com&limit=3"
 
 
+def test_surt_prefix_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """/cdx-index/surt-prefix wildcard-scans captures under a SURT prefix.
+
+    The fixture index (from _make_cdxj) has:
+      com,example)/page1   (2 captures: 20260101120000, 20260102130000)
+      org,other)/news      (1 capture)
+    so the host patterns present are com, com,example, org, org,other.
+    """
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir = tmp_path / "cdxj"
+    cdxj_dir.mkdir(parents=True)
+    _make_cdxj(cdxj_dir, test_catalog)
+    build_index(str(cdxj_dir), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    counter = load_report(output_dir / "surt_report.json")
+    monkeypatch.setattr(server, "SURT_REPORT_CACHE", counter)
+
+    opts = Options(raw_mode=True)
+    db = Rdict(str(output_dir / "rocks"), options=opts, access_type=AccessType.read_only())
+    server.app.state.db = db
+    server.app.state.catalog = _load_id_to_path(output_dir / "all_warc_paths.txt.zst")
+    try:
+        client = TestClient(server.app)
+
+        # Host pattern: the host's own captures (2 under com,example)
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "com,example"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["query_url"] == "com,example"
+        assert body["surt_prefix"] == "com,example"
+        assert body["exact_match"] is False
+        assert body["total_results"] == 2
+        assert all(r["surt_key"].startswith(("com,example)", "com,example,")) for r in body["results"])
+
+        # TLD pattern: everything under com
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "com", "limit": 10})
+        body = resp.json()
+        assert body["total_results"] == 2
+
+        # Path prefix: plain string prefix of com,example)/page1
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "com,example)/page1"})
+        assert resp.json()["total_results"] == 2
+
+        # Host never indexed: pre-check short-circuits to empty (no 404)
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "net,zzz"})
+        assert resp.status_code == 200
+        assert resp.json()["total_results"] == 0
+
+        # Limit caps results
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "com", "limit": 1})
+        body = resp.json()
+        assert body["total_results"] == 1
+        assert len(body["results"]) == 1
+    finally:
+        db.close()
+        _clear_state()
+
+
+def test_surt_prefix_host_boundary_excludes_sibling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A bare-host prefix must not bleed into a sibling host sharing the label string."""
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir = tmp_path / "cdxj"
+    cdxj_dir.mkdir(parents=True)
+
+    # Two hosts whose SURT label strings overlap as a raw string prefix:
+    #   com,example,aa  and  com,example,aaace
+    name_to_id = build.load_catalog(str(test_catalog))
+    filenames = list(name_to_id.keys())
+    records = [
+        ("https://aa.example.com/x", "20200101000000", filenames[0], 10, 100),
+        ("https://aaace.example.com/z", "20200102000000", filenames[1], 20, 100),
+    ]
+    cdxj_path = cdxj_dir / "test.cdxj.zst"
+    cctx = zstd.ZstdCompressor(level=1)
+    with open(cdxj_path, "wb") as fout:
+        with cctx.stream_writer(fout) as writer:
+            text_writer = io.TextIOWrapper(writer, encoding="utf-8")
+            for url, ts, filename, offset, length in records:
+                surt_str = surt.surt(url)
+                meta = json.dumps({
+                    "filename": filename, "offset": offset, "length": length,
+                    "offset_in_warc": offset,
+                    "warcproxycdxline": f"WARC/1.0 {url} {ts}",
+                })
+                text_writer.write(f"{surt_str} {ts} {meta}\n")
+            text_writer.flush()
+
+    build_index(str(cdxj_dir), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    counter = load_report(output_dir / "surt_report.json")
+    monkeypatch.setattr(server, "SURT_REPORT_CACHE", counter)
+
+    opts = Options(raw_mode=True)
+    db = Rdict(str(output_dir / "rocks"), options=opts, access_type=AccessType.read_only())
+    server.app.state.db = db
+    server.app.state.catalog = _load_id_to_path(output_dir / "all_warc_paths.txt.zst")
+    try:
+        client = TestClient(server.app)
+        # Host pattern com,example,aa must match ONLY that host, not com,example,aaace
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "com,example,aa"})
+        assert resp.status_code == 200
+        body = resp.json()
+        hosts = {r["surt_key"].split(")")[0] for r in body["results"]}
+        assert hosts == {"com,example,aa"}
+        assert body["total_results"] == 1
+    finally:
+        db.close()
+        _clear_state()
+
+
 def test_lookup_accepts_surt_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """/lookup accepts a literal SURT key only with key=surt (no auto-detect)."""
     test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"

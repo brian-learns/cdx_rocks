@@ -374,6 +374,62 @@ async def surt_browse_endpoint(
     }
 
 
+@api_router.get("/surt-prefix", response_model=LookupResponse)
+async def surt_prefix_endpoint(
+    prefix: Annotated[
+        str,
+        Query(
+            description=(
+                "SURT prefix to scan. A host pattern (no ')') such as 'com,aa' matches "
+                "the host and all its subdomains (never sibling hosts like 'com,aaa,ace'). "
+                "A prefix containing ')' such as 'com,aaa,ace)/activities' matches that "
+                "path prefix (wildcard)."
+            )
+        ),
+    ],
+    limit: Annotated[int, Query(description="Maximum number of results to return", ge=1, le=100)] = 10,
+):
+    """Wildcard search: capture records under a SURT prefix.
+
+    ``prefix`` is a SURT string, e.g. ``com,aa`` (host + subdomains) or
+    ``com,aaa,ace)/activities`` (path prefix of ace.aaa.com). Results are in
+    key order (SURT, then timestamp) and capped by ``limit``; ``total_results``
+    is the number returned, not a true total. Prefixes whose host was never
+    indexed return an empty result without touching RocksDB — never 404.
+    """
+    host_part = prefix.split(")", 1)[0]
+    if SURT_REPORT_CACHE is not None and host_part not in SURT_REPORT_CACHE.patterns:
+        return {
+            "query_url": prefix,
+            "surt_prefix": prefix,
+            "exact_match": False,
+            "at_timestamp": None,
+            "total_results": 0,
+            "limit": limit,
+            "results": [],
+        }
+    try:
+        _, captures = query_index(
+            app, "", exact_match=False, limit=limit,
+            surt_key=prefix, host_boundary=")" not in prefix,
+        )
+    except ValueError as e:
+        logger.exception("Surt prefix scan failed (prefix=%r)", prefix)
+        raise HTTPException(status_code=500, detail="Lookup failed: internal index error.") from e
+    except Exception as e:
+        logger.exception("Malformed surt-prefix request (prefix=%r)", prefix)
+        raise HTTPException(status_code=400, detail="Malformed lookup request.") from e
+    return {
+        "query_url": prefix,
+        "surt_prefix": prefix,
+        "exact_match": False,
+        "at_timestamp": None,
+        "total_results": len(captures),
+        "limit": limit,
+        "results": captures,
+    }
+
+
 app.include_router(api_router)
 
 
