@@ -7,7 +7,7 @@ import tempfile
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 from pathlib import Path
-from typing import Annotated, Literal, override
+from typing import Annotated, Literal, cast, override
 
 import zstandard as zstd
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
@@ -142,9 +142,12 @@ class SurtBrowseResponse(BaseModel):
     total_entries: Annotated[int, Field(description="Total entries in the whole index")]
     children: Annotated[
         dict[str, int],
-        Field(description="Direct children (pattern -> count), sorted by count desc, capped by limit"),
+        Field(description="Direct children (pattern -> count), rank order (count desc, name asc), capped by limit"),
     ]
     total_children: Annotated[int, Field(description="Number of children before the limit was applied")]
+    offset: Annotated[int, Field(description="Children skipped before this page (0-based)")] = 0
+    limit: Annotated[int, Field(description="Page size that was applied")]
+    next_offset: Annotated[int | None, Field(description="Offset for the next page; null on the last page")] = None
 
 
 class HealthCheckFilter(logging.Filter):
@@ -333,12 +336,19 @@ async def surt_browse_endpoint(
         ),
     ] = "",
     limit: Annotated[int, Query(description="Maximum number of children to return", ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(description="Children to skip before applying limit", ge=0)] = 0,
 ):
     """Browse the index's SURT host tree one level at a time.
 
     Each child key is itself a valid ``pattern`` value, so the tree can be
     walked level by level until a leaf host. Counts are entry totals from
     ``surt_report.json`` (build + updates), not unique URLs.
+
+    Children are returned in rank order (count desc, name asc); the order is
+    stable for the life of a server run (the index is frozen until restart).
+    Walk a full node with ``next_offset``: request, then request again with
+    ``offset=next_offset`` until it is ``null``. Offsets past the end return
+    an empty ``children`` dict — never 404.
     """
     if SURT_TREE is None:
         raise HTTPException(
@@ -346,13 +356,21 @@ async def surt_browse_endpoint(
             detail="No surt_report.json in the index directory (index built before the SURT report feature, or the report is unreadable).",
         )
 
-    result = SURT_TREE.hop(pattern, limit=limit)
+    result = SURT_TREE.hop(pattern, limit=limit, offset=offset)
+    children = cast("dict[str, int]", result["children"])
+    total_children = cast("int", result["total_children"])
+    next_offset = offset + len(children)
+    if next_offset >= total_children:
+        next_offset = None
     return {
         "pattern": result["pattern"],
         "count": result["count"],
         "total_entries": SURT_TREE.total_entries,
-        "children": result["children"],
-        "total_children": result["total_children"],
+        "children": children,
+        "total_children": total_children,
+        "offset": offset,
+        "limit": limit,
+        "next_offset": next_offset,
     }
 
 

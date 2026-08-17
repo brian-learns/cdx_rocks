@@ -444,6 +444,31 @@ def test_surt_endpoint_browses_host_tree(tmp_path: Path, monkeypatch: pytest.Mon
     assert list(body["children"]) == ["com"]
     assert body["total_children"] == 2
 
+    # Pagination: offset=0 is the first page, next_offset chains to the last
+    resp = client.get("/cdx-index/surt", params={"limit": 1, "offset": 0})
+    body = resp.json()
+    assert body["children"] == {"com": 2}
+    assert body["offset"] == 0
+    assert body["limit"] == 1
+    assert body["next_offset"] == 1
+
+    resp = client.get("/cdx-index/surt", params={"limit": 1, "offset": 1})
+    body = resp.json()
+    assert body["children"] == {"org": 1}
+    assert body["next_offset"] is None  # last page
+
+    # Offset past the end: 200 + empty (never 404)
+    resp = client.get("/cdx-index/surt", params={"offset": 99})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["children"] == {}
+    assert body["next_offset"] is None
+    assert body["total_children"] == 2
+
+    # Negative offset is rejected
+    resp = client.get("/cdx-index/surt", params={"offset": -1})
+    assert resp.status_code == 422
+
 
 def test_surt_endpoint_404_without_report(monkeypatch: pytest.MonkeyPatch):
     """Indexes built before the report feature get a clear 404."""
