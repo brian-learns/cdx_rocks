@@ -404,7 +404,7 @@ def test_surt_endpoint_browses_host_tree(tmp_path: Path, monkeypatch: pytest.Mon
     client = TestClient(server.app)
 
     # Root level: top-level labels with counts
-    resp = client.get("/cdx-index/surt")
+    resp = client.get("/cdx-index/surt-browse")
     assert resp.status_code == 200
     body = resp.json()
     assert body["pattern"] == ""
@@ -414,7 +414,7 @@ def test_surt_endpoint_browses_host_tree(tmp_path: Path, monkeypatch: pytest.Mon
     assert body["children"] == {"com": 2, "org": 1}
 
     # One level down
-    resp = client.get("/cdx-index/surt", params={"pattern": "com"})
+    resp = client.get("/cdx-index/surt-browse", params={"pattern": "com"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["pattern"] == "com"
@@ -422,7 +422,7 @@ def test_surt_endpoint_browses_host_tree(tmp_path: Path, monkeypatch: pytest.Mon
     assert body["children"] == {"com,example": 2}
 
     # Leaf host: its own count, no children
-    resp = client.get("/cdx-index/surt", params={"pattern": "com,example"})
+    resp = client.get("/cdx-index/surt-browse", params={"pattern": "com,example"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["count"] == 2
@@ -430,14 +430,14 @@ def test_surt_endpoint_browses_host_tree(tmp_path: Path, monkeypatch: pytest.Mon
     assert body["total_children"] == 0
 
     # Unknown pattern: valid response, empty
-    resp = client.get("/cdx-index/surt", params={"pattern": "net"})
+    resp = client.get("/cdx-index/surt-browse", params={"pattern": "net"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["count"] == 0
     assert body["children"] == {}
 
     # Limit caps the children
-    resp = client.get("/cdx-index/surt", params={"limit": 1})
+    resp = client.get("/cdx-index/surt-browse", params={"limit": 1})
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["children"]) == 1
@@ -445,20 +445,20 @@ def test_surt_endpoint_browses_host_tree(tmp_path: Path, monkeypatch: pytest.Mon
     assert body["total_children"] == 2
 
     # Pagination: offset=0 is the first page, next_offset chains to the last
-    resp = client.get("/cdx-index/surt", params={"limit": 1, "offset": 0})
+    resp = client.get("/cdx-index/surt-browse", params={"limit": 1, "offset": 0})
     body = resp.json()
     assert body["children"] == {"com": 2}
     assert body["offset"] == 0
     assert body["limit"] == 1
     assert body["next_offset"] == 1
 
-    resp = client.get("/cdx-index/surt", params={"limit": 1, "offset": 1})
+    resp = client.get("/cdx-index/surt-browse", params={"limit": 1, "offset": 1})
     body = resp.json()
     assert body["children"] == {"org": 1}
     assert body["next_offset"] is None  # last page
 
     # Offset past the end: 200 + empty (never 404)
-    resp = client.get("/cdx-index/surt", params={"offset": 99})
+    resp = client.get("/cdx-index/surt-browse", params={"offset": 99})
     body = resp.json()
     assert resp.status_code == 200
     assert body["children"] == {}
@@ -466,7 +466,7 @@ def test_surt_endpoint_browses_host_tree(tmp_path: Path, monkeypatch: pytest.Mon
     assert body["total_children"] == 2
 
     # Negative offset is rejected
-    resp = client.get("/cdx-index/surt", params={"offset": -1})
+    resp = client.get("/cdx-index/surt-browse", params={"offset": -1})
     assert resp.status_code == 422
 
 
@@ -474,17 +474,17 @@ def test_surt_endpoint_404_without_report(monkeypatch: pytest.MonkeyPatch):
     """Indexes built before the report feature get a clear 404."""
     monkeypatch.setattr(server, "SURT_TREE", None)
     client = TestClient(server.app)
-    resp = client.get("/cdx-index/surt")
+    resp = client.get("/cdx-index/surt-browse")
     assert resp.status_code == 404
     assert "surt_report.json" in resp.json()["detail"]
 
 
 def test_surt_root_redirects_to_router_path():
-    """Top-level /surt redirects to /cdx-index/surt preserving the query."""
+    """Top-level /surt redirects to /cdx-index/surt-browse preserving the query."""
     client = TestClient(server.app, follow_redirects=False)
     resp = client.get("/surt", params={"pattern": "com", "limit": 3})
     assert resp.status_code == 307
-    assert resp.headers["location"] == "/cdx-index/surt?pattern=com&limit=3"
+    assert resp.headers["location"] == "/cdx-index/surt-browse?pattern=com&limit=3"
 
 
 def test_surt_prefix_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

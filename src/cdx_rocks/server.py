@@ -222,8 +222,8 @@ def redirect_old_extent():
 
 @app.get("/surt", include_in_schema=False)
 def redirect_surt(request: Request):
-    """Redirect /surt to /cdx-index/surt"""
-    return RedirectResponse(url=f"/cdx-index/surt?{request.url.query}")
+    """Redirect /surt to /cdx-index/surt-browse."""
+    return RedirectResponse(url=f"/cdx-index/surt-browse?{request.url.query}")
 
 
 @app.get("/health", include_in_schema=False)
@@ -324,7 +324,7 @@ async def extent_endpoint():
     }
 
 
-@api_router.get("/surt", response_model=SurtBrowseResponse)
+@api_router.get("/surt-browse", response_model=SurtBrowseResponse)
 async def surt_browse_endpoint(
     pattern: Annotated[
         str,
