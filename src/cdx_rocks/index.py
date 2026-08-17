@@ -33,6 +33,7 @@ def query_index(
     limit: int = 10,
     at: str | None = None,
     surt_key: str | None = None,
+    host_boundary: bool = False,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Core lookup engine:
 
@@ -41,6 +42,10 @@ def query_index(
       (among the keys within the scan cap — see MAX_SCAN_KEYS).
     - surt_key: If given, used verbatim as the SURT prefix (no URL parsing), so
       callers can query with a literal SURT key such as ``com,yahoo,news``.
+    - host_boundary: With a bare-host *surt_key* (no `')'`), match only the
+      host and its subdomains — keys starting with ``host)`` or ``host,`` —
+      excluding sibling hosts that share the label string (``com,aa`` vs
+      ``com,aaa``). Ignored when *surt_key* contains `')'`.
     - Availability: at most MAX_SCAN_KEYS keys are examined per request.
     """
     from contextlib import suppress
@@ -70,6 +75,8 @@ def query_index(
 
     results: list[dict[str, str | int]] = []
     scanned = 0
+    # Boundary matching only applies to bare-host prefixes (no ')').
+    boundary_active = host_boundary and not exact_match and b")" not in prefix_bytes
 
     for key, value in db.items(from_key=from_key):
         if not isinstance(key, bytes):
@@ -77,6 +84,16 @@ def query_index(
 
         if not key.startswith(prefix_bytes):
             break
+
+        # Host-boundary scan: a bare-host prefix matches only the host and its
+        # subdomains, so the byte right after the prefix must be ')' (the host
+        # itself) or ',' (a subdomain). Any other byte means a sibling host
+        # (com,aaa) that shares the label string — and because matching keys
+        # are contiguous in lex order, we can stop the scan here.
+        if boundary_active:
+            nxt = key[len(prefix_bytes) : len(prefix_bytes) + 1]
+            if nxt not in (b")", b","):
+                break
 
         scanned += 1
         decoded_key = key.decode("utf-8", errors="replace")

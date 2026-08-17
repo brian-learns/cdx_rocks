@@ -362,3 +362,53 @@ def test_lookup_surt_key_path_suffix_checks_host(monkeypatch: pytest.MonkeyPatch
     assert resp.status_code == 200
     assert resp.json()["total_results"] == 1
     _clear_state()
+
+
+class TestQueryIndexHostBoundary:
+    """A bare-host SURT prefix must not bleed into sibling hosts that share
+    the label string (com,example,aa must not match com,example,aaace)."""
+
+    @staticmethod
+    def _items() -> dict[bytes, bytes]:
+        return {
+            _make_key("https://aa.example.com/x", "20200101000000"): _make_value(0, 1, 10),
+            _make_key("https://sub.aa.example.com/y", "20200102000000"): _make_value(0, 2, 10),
+            _make_key("https://aaace.example.com/z", "20200103000000"): _make_value(0, 3, 10),
+        }
+    # SURT keys: com,example,aa)/x   com,example,aa,sub)/y   com,example,aaace)/z
+
+    def test_host_boundary_excludes_sibling(self):
+        _setup_state(MockRdict(self._items()), {0: "warc0"})
+        try:
+            _, results = index.query_index(
+                server.app, "", exact_match=False, limit=10,
+                surt_key="com,example,aa", host_boundary=True,
+            )
+            assert {r["surt_key"].split(")")[0] for r in results} == {
+                "com,example,aa", "com,example,aa,sub",
+            }
+        finally:
+            _clear_state()
+
+    def test_no_boundary_keeps_sibling(self):
+        _setup_state(MockRdict(self._items()), {0: "warc0"})
+        try:
+            _, results = index.query_index(
+                server.app, "", exact_match=False, limit=10,
+                surt_key="com,example,aa",
+            )
+            assert len(results) == 3  # legacy raw string-prefix behavior unchanged
+        finally:
+            _clear_state()
+
+    def test_path_prefix_ignores_boundary_flag(self):
+        _setup_state(MockRdict(self._items()), {0: "warc0"})
+        try:
+            # Prefix containing ')' is a plain string-prefix scan; the flag is ignored.
+            _, results = index.query_index(
+                server.app, "", exact_match=False, limit=10,
+                surt_key="com,example,aa)", host_boundary=True,
+            )
+            assert {r["surt_key"].split(")")[0] for r in results} == {"com,example,aa"}
+        finally:
+            _clear_state()
