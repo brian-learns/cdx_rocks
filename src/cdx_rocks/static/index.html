@@ -145,11 +145,10 @@
   </div>
 </header>
 <div class="docslinks">
-  <a href="/docs">Swagger UI · /docs</a>
-  <a href="/redoc">ReDoc · /redoc</a>
-  <a href="/terms">Terms &amp; disclaimer · /terms</a>
-  <a href="https://github.com/brian-learns/ccnget"><code>ccnget</code> on github</a>
   <a href="https://github.com/brian-learns/cdx_rocks"><code>cdx_rocks</code> on github</a>
+  <a href="/docs">Swagger Docs</a>
+  <a href="/redoc">ReDoc</a>
+  <a href="https://github.com/brian-learns/ccnget"><code>ccnget</code> python client</a>
   <a href="https://huggingface.co/datasets/brian-learns/cdx-cc-news"><code>cdx-cc-news</code> HuggingFace Dataset</a>
   <a href="https://data.commoncrawl.org/crawl-data/CC-NEWS/index.html">Common Crawl News on AWS Open Data</a>
 </div>
@@ -397,7 +396,7 @@ const pBody = document.getElementById("p-body");
 const pRaw = document.getElementById("p-raw");
 const pPrefix = document.getElementById("p-prefix");
 
-const EXAMPLES = [
+/* const EXAMPLES = [
   ["com,reuters", "host + subdomains"],
   ["com,reuters)/world", "path prefix (wildcard)"],
   ["com,google,news", "one host"],
@@ -411,7 +410,7 @@ EXAMPLES.forEach(([p, title]) => {
   el.title = title;
   el.addEventListener("click", () => { pPrefix.value = p; loadPrefix(); });
   chips.appendChild(el);
-});
+}); */
 
 function jumpToScan(pattern) {
   if (pattern != null) pPrefix.value = pattern;
