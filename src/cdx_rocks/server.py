@@ -11,7 +11,8 @@ from typing import Annotated, cast, override
 
 import zstandard as zstd
 from fastapi import APIRouter, FastAPI, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from rocksdict import AccessType, DBCompressionType, Options, Rdict
 
@@ -75,27 +76,6 @@ SURT_TREE: SurtTree | None = (
 API_VERSION = "0.6.0"
 DESCRIPTION = f"""
 URL lookup tool for [Common Crawl News Dataset](https://data.commoncrawl.org/crawl-data/CC-NEWS/index.html) indexed in RocksDB with a simple API.
-
-Command line client [`ccnget` on github](https://github.com/brian-learns/ccnget).
-
-This server [`cdx_rocks` on github](https://github.com/brian-learns/cdx_rocks).
-v{version("cdx_rocks")} is the version of the server running now.
-
-Built from the [brian-learns/cdx-cc-news Dataset](https://huggingface.co/datasets/brian-learns/cdx-cc-news)
-
-Files retrieved from Common Crawl are subject to [Common Crawl Terms of Use](https://commoncrawl.org/terms-of-use) and the original publisher's copyright.
-
-THIS SOFTWARE IS PROVIDED BY "AS IS" AND ANY EXPRESS OR IMPLIED
-WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-IN NO EVENT SHALL THE OPERATORS OR CONTRIBUTORS BE LIABLE FOR
-ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
-GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
-IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
-IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 
@@ -205,15 +185,40 @@ async def lifespan(app: FastAPI):
     db.close()
 
 
-app = FastAPI(title="Common Crawl News Index Gateway", lifespan=lifespan, description=DESCRIPTION, version=API_VERSION)
+app = FastAPI(
+    title="Common Crawl News Index Gateway",
+    lifespan=lifespan,
+    description=DESCRIPTION,
+    version=API_VERSION,
+    license_info={
+        "name": "Data Usage & Disclaimer Notice",
+        # Pydantic requires an absolute URL for the license link; point it at
+        # this deployment's /terms (override the origin via CDX_ROCKS_PUBLIC_BASE).
+        "url": os.environ.get("CDX_ROCKS_PUBLIC_BASE", "http://localhost:7860").rstrip("/") + "/terms",
+    },
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 api_router = APIRouter(prefix="/cdx-index")
 
 
-@app.get("/", include_in_schema=False)
-async def docs_redirect():
-    """Redirect the root URL to the Swagger/OpenAPI docs page."""
-    return RedirectResponse(url="/docs")
+@app.get("/", include_in_schema=False, response_class=HTMLResponse)
+async def home() -> str:
+    """Serve the interactive demo/home page (SURT tree browse + prefix scan)."""
+    return (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+
+
+@app.get("/terms", include_in_schema=False, response_class=HTMLResponse)
+async def terms() -> str:
+    """Serve the data usage & disclaimer notice page."""
+    return (Path(__file__).parent / "static" / "terms.html").read_text(encoding="utf-8")
 
 
 @app.get("/health", include_in_schema=False)

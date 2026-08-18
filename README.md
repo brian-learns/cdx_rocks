@@ -121,7 +121,10 @@ set `CDX_ROCKS` to point to a [cdx-rocks database](https://github.com/brian-lear
 | `/cdx-index/surt-browse` | GET | Browse the SURT host tree one level at a time |
 | `/cdx-index/surt-prefix` | GET | Wildcard scan: captures under a SURT prefix |
 | `/health` | GET | Server health check |
+| `/` | GET | Interactive home page (SURT tree browse + prefix scan demo) |
+| `/terms` | GET | Data usage & disclaimer notice |
 | `/docs` | GET | Swagger/OpenAPI documentation |
+| `/redoc` | GET | ReDoc documentation |
 
 ### Lookup Parameters
 
