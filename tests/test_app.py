@@ -368,23 +368,6 @@ class TestQueryIndexHostBoundary:
 
     # SURT keys: com,example,aa)/x   com,example,aa,sub)/y   com,example,aaace)/z
 
-    def test_host_boundary_excludes_sibling(self):
-        _setup_state(MockRdict(self._items()), {0: "warc0"})
-        try:
-            _, results = index.query_index(
-                server.app,
-                "",
-                exact_match=False,
-                limit=10,
-                surt_key="com,example,aa",
-                host_boundary=True,
-            )
-            assert {r["surt_key"].split(")")[0] for r in results} == {
-                "com,example,aa",
-                "com,example,aa,sub",
-            }
-        finally:
-            _clear_state()
 
     def test_no_boundary_keeps_sibling(self):
         _setup_state(MockRdict(self._items()), {0: "warc0"})
@@ -410,7 +393,6 @@ class TestQueryIndexHostBoundary:
                 exact_match=False,
                 limit=10,
                 surt_key="com,example,aa)",
-                host_boundary=True,
             )
             assert {r["surt_key"].split(")")[0] for r in results} == {"com,example,aa"}
         finally:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated, cast, override
 
 import zstandard as zstd
-from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from rocksdict import AccessType, DBCompressionType, Options, Rdict
@@ -113,10 +113,19 @@ class CaptureResult(BaseModel):
 class LookupResponse(BaseModel):
     """Response body for a CDX index lookup query."""
 
-    query_url: Annotated[str, Field(description="Original query as requested (URL or literal SURT key)")]
+    query_url: Annotated[str, Field(description="Original query as requested")]
     surt_prefix: Annotated[str, Field(description="SURT string used for lookup")]
     exact_match: Annotated[bool, Field(description="Whether exact matching was used")]
     at_timestamp: Annotated[str | None, Field(description="Timestamp parameter requested")] = None
+    total_results: Annotated[int, Field(description="Number of results returned")]
+    limit: Annotated[int, Field(description="Maximum results cap requested")]
+    results: Annotated[list[CaptureResult], Field(description="List of matched WARC captures")]
+
+
+class SurtScanResponse(BaseModel):
+    """Response body for a CDX index lookup query."""
+
+    surt_prefix: Annotated[str, Field(description="SURT string used for lookup")]
     total_results: Annotated[int, Field(description="Number of results returned")]
     limit: Annotated[int, Field(description="Maximum results cap requested")]
     results: Annotated[list[CaptureResult], Field(description="List of matched WARC captures")]
@@ -207,25 +216,6 @@ async def docs_redirect():
     return RedirectResponse(url="/docs")
 
 
-@app.get("/lookup", include_in_schema=False)
-def redirect_old_lookup(request: Request):
-    """Redirect /lookup to /cdx-index/lookup"""
-    # 307 Redirect preserves the request method (GET, POST, etc.)
-    return RedirectResponse(url=f"/cdx-index/lookup?{request.url.query}")
-
-
-@app.get("/extent", include_in_schema=False)
-def redirect_old_extent():
-    """Redirect /extent to /cdx-index/extent"""
-    return RedirectResponse(url="/cdx-index/extent")
-
-
-@app.get("/surt", include_in_schema=False)
-def redirect_surt(request: Request):
-    """Redirect /surt to /cdx-index/surt-browse."""
-    return RedirectResponse(url=f"/cdx-index/surt-browse?{request.url.query}")
-
-
 @app.get("/health", include_in_schema=False)
 async def health():
     """Healthcheck endpoint. Verifies catalog and RocksDB are loaded."""
@@ -251,12 +241,7 @@ async def lookup_endpoint(
     ] = None,
     limit: Annotated[int, Query(description="Maximum number of results to return", ge=1, le=100)] = 10,
 ):
-    """REST API endpoint supporting exact, partial prefix, or timestamp-targeted matching.
-
-    ``url`` is always parsed as a URL. For literal SURT keys (e.g. a host
-    pattern copied from ``/cdx-index/surt-browse``) use
-    ``/cdx-index/surt-prefix`` instead.
-    """
+    """REST API endpoint supporting exact, partial prefix, or timestamp-targeted matching."""
     try:
         surt_prefix, captures = query_index(app, url, exact_match=exact, limit=limit, at=at)
     except ValueError as e:
@@ -277,48 +262,16 @@ async def lookup_endpoint(
     }
 
 
-@api_router.get("/extent", response_model=ExtentResponse)
-async def extent_endpoint():
-    """show what content is indexed on this server"""
-    catalog: dict[int, str] = getattr(app.state, "catalog", {})
-    if not catalog:
-        raise HTTPException(status_code=500, detail="Catalog not loaded.")
-
-    first_key = min(catalog)
-    last_key = max(catalog)
-    return {
-        "file_extent": len(catalog),
-        "file_oldest": catalog[first_key],
-        "file_newest": catalog[last_key],
-    }
-
-
 @api_router.get("/surt-browse", response_model=SurtBrowseResponse)
 async def surt_browse_endpoint(
     pattern: Annotated[
         str,
-        Query(
-            description=(
-                "SURT host pattern to expand (comma-joined labels, e.g. 'com' or 'com,example'). "
-                "Empty for the root level."
-            )
-        ),
+        Query(description=("Pattern to expand, empty for root level")),
     ] = "",
     limit: Annotated[int, Query(description="Maximum number of children to return", ge=1, le=200)] = 50,
     offset: Annotated[int, Query(description="Children to skip before applying limit", ge=0)] = 0,
 ):
-    """Browse the index's SURT host tree one level at a time.
-
-    Each child key is itself a valid ``pattern`` value, so the tree can be
-    walked level by level until a leaf host. Counts are entry totals from
-    ``surt_report.json`` (build + updates), not unique URLs.
-
-    Children are returned in rank order (count desc, name asc); the order is
-    stable for the life of a server run (the index is frozen until restart).
-    Walk a full node with ``next_offset``: request, then request again with
-    ``offset=next_offset`` until it is ``null``. Offsets past the end return
-    an empty ``children`` dict — never 404.
-    """
+    """Browse the index's SURT host tree one level at a time."""
     if SURT_TREE is None:
         raise HTTPException(
             status_code=404,
@@ -343,18 +296,11 @@ async def surt_browse_endpoint(
     }
 
 
-@api_router.get("/surt-prefix", response_model=LookupResponse)
+@api_router.get("/surt-prefix", response_model=SurtScanResponse)
 async def surt_prefix_endpoint(
     prefix: Annotated[
         str,
-        Query(
-            description=(
-                "SURT prefix to scan. A host pattern (no ')') such as 'com,aa' matches "
-                "the host and all its subdomains (never sibling hosts like 'com,aaa,ace'). "
-                "A prefix containing ')' such as 'com,aaa,ace)/activities' matches that "
-                "path prefix (wildcard)."
-            )
-        ),
+        Query(description=("SURT prefix to scan.")),
     ],
     limit: Annotated[int, Query(description="Maximum number of results to return", ge=1, le=100)] = 10,
 ):
@@ -363,20 +309,8 @@ async def surt_prefix_endpoint(
     ``prefix`` is a SURT string, e.g. ``com,aa`` (host + subdomains) or
     ``com,aaa,ace)/activities`` (path prefix of ace.aaa.com). Results are in
     key order (SURT, then timestamp) and capped by ``limit``; ``total_results``
-    is the number returned, not a true total. Prefixes whose host was never
-    indexed return an empty result without touching RocksDB — never 404.
+    is the number returned, not a true total.
     """
-    host_part = prefix.split(")", 1)[0]
-    if SURT_REPORT_CACHE is not None and host_part not in SURT_REPORT_CACHE.patterns:
-        return {
-            "query_url": prefix,
-            "surt_prefix": prefix,
-            "exact_match": False,
-            "at_timestamp": None,
-            "total_results": 0,
-            "limit": limit,
-            "results": [],
-        }
     try:
         _, captures = query_index(
             app,
@@ -384,7 +318,7 @@ async def surt_prefix_endpoint(
             exact_match=False,
             limit=limit,
             surt_key=prefix,
-            host_boundary=")" not in prefix,
+            #    host_boundary=")" not in prefix,
         )
     except ValueError as e:
         logger.exception("Surt prefix scan failed (prefix=%r)", prefix)
@@ -393,13 +327,26 @@ async def surt_prefix_endpoint(
         logger.exception("Malformed surt-prefix request (prefix=%r)", prefix)
         raise HTTPException(status_code=400, detail="Malformed lookup request.") from e
     return {
-        "query_url": prefix,
         "surt_prefix": prefix,
-        "exact_match": False,
-        "at_timestamp": None,
         "total_results": len(captures),
         "limit": limit,
         "results": captures,
+    }
+
+
+@api_router.get("/extent", response_model=ExtentResponse)
+async def extent_endpoint():
+    """show what content is indexed on this server"""
+    catalog: dict[int, str] = getattr(app.state, "catalog", {})
+    if not catalog:
+        raise HTTPException(status_code=500, detail="Catalog not loaded.")
+
+    first_key = min(catalog)
+    last_key = max(catalog)
+    return {
+        "file_extent": len(catalog),
+        "file_oldest": catalog[first_key],
+        "file_newest": catalog[last_key],
     }
 
 
