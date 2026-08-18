@@ -286,3 +286,114 @@ def test_health_endpoint_not_ready():
     resp = client.get("/health")
     assert resp.status_code == 503
     assert "not ready" in resp.json()["detail"].lower()
+
+
+def test_query_index_scan_cap():
+    """A request examines at most MAX_SCAN_KEYS keys (availability)."""
+    n = index.MAX_SCAN_KEYS * 2
+    items: dict[bytes, bytes] = {}
+    for i in range(n):
+        items[_make_key(f"https://example.com/p{i:04d}", f"20260101{i:010d}")] = _make_value(1, i, 10)
+
+    class CountingDB:
+        """Sorted items that count how many keys the query loop consumed."""
+
+        def __init__(self, items: list[tuple[bytes, bytes]]) -> None:
+            self._items = items
+            self.iterations = 0
+
+        def items(self, from_key: bytes | None = None):
+            if from_key is None:
+                seq = self._items
+            else:
+                seq = [(k, v) for k, v in self._items if k >= from_key]
+            for item in seq:
+                self.iterations += 1
+                yield item
+
+        def close(self) -> None:
+            pass
+
+    db = CountingDB(sorted(items.items()))
+    server.app.state.db = db
+    server.app.state.catalog = {1: "/data/w.warc.gz"}
+    try:
+        _surt, results = index.query_index(
+            server.app, "https://example.com", exact_match=False, at="20260101000000", limit=5
+        )
+        assert db.iterations <= index.MAX_SCAN_KEYS
+        assert len(results) <= 5
+    finally:
+        _clear_state()
+
+
+def test_lookup_is_url_only(monkeypatch: pytest.MonkeyPatch):
+    """/lookup treats url as a URL only — no SURT-key mode (use /surt-prefix)."""
+    items = {
+        _make_key("https://example.com/page", "20260801120000"): _make_value(1, 0, 500),
+    }
+    _setup_state(MockRdict(items), {1: "/data/w.warc.gz"})
+
+    client = TestClient(server.app)
+
+    # A SURT-looking string is parsed as a URL (surt.surt("com,example") -> "com,example)/")
+    resp = client.get("/cdx-index/lookup", params={"url": "com,example"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["surt_prefix"] == "com,example)/"
+
+    # A legacy key=surt param is silently ignored (unknown query param)
+    resp = client.get("/cdx-index/lookup", params={"url": "com,example", "key": "surt"})
+    assert resp.status_code == 200
+    assert resp.json()["surt_prefix"] == "com,example)/"
+
+    # A real URL still resolves normally
+    resp = client.get("/cdx-index/lookup", params={"url": "https://example.com/page", "exact": True})
+    assert resp.status_code == 200
+    assert resp.json()["total_results"] == 1
+    _clear_state()
+
+
+class TestQueryIndexHostBoundary:
+    """A bare-host SURT prefix must not bleed into sibling hosts that share
+    the label string (com,example,aa must not match com,example,aaace)."""
+
+    @staticmethod
+    def _items() -> dict[bytes, bytes]:
+        return {
+            _make_key("https://aa.example.com/x", "20200101000000"): _make_value(0, 1, 10),
+            _make_key("https://sub.aa.example.com/y", "20200102000000"): _make_value(0, 2, 10),
+            _make_key("https://aaace.example.com/z", "20200103000000"): _make_value(0, 3, 10),
+        }
+
+    # SURT keys: com,example,aa)/x   com,example,aa,sub)/y   com,example,aaace)/z
+
+
+    def test_no_boundary_keeps_sibling(self):
+        _setup_state(MockRdict(self._items()), {0: "warc0"})
+        try:
+            _, results = index.query_index(
+                server.app,
+                "",
+                exact_match=False,
+                limit=10,
+                surt_key="com,example,aa",
+            )
+            assert len(results) == 3  # legacy raw string-prefix behavior unchanged
+        finally:
+            _clear_state()
+
+    def test_path_prefix_ignores_boundary_flag(self):
+        _setup_state(MockRdict(self._items()), {0: "warc0"})
+        try:
+            # Prefix containing ')' is a plain string-prefix scan; the flag is ignored.
+            _, results = index.query_index(
+                server.app,
+                "",
+                exact_match=False,
+                limit=10,
+                surt_key="com,example,aa)",
+            )
+            assert {r["surt_key"].split(")")[0] for r in results} == {"com,example,aa"}
+        finally:
+            _clear_state()

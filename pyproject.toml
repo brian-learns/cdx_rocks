@@ -1,6 +1,6 @@
 [project]
 name = "cdx-rocks"
-version = "0.3.2"
+version = "0.3.3"
 description = "RocksDB-powered CDX index server for Common Crawl News"
 readme = "README.md"
 authors = [

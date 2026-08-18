@@ -25,6 +25,7 @@ import zstandard as zstd
 from rocksdict import DBCompactionStyle, DBCompressionType, Options, Rdict, WriteBatch
 
 from cdx_rocks.config import ManifestError, load_manifest
+from cdx_rocks.report import REPORT_FILENAME, load_report, write_report
 from cdx_rocks.schema import safe_pack, validate_struct_format
 
 logger = logging.getLogger(__name__)
@@ -130,6 +131,10 @@ def update_index(
     dctx = zstd.ZstdDecompressor()
     record_count = 0
 
+    # Load the existing report so the new file's counts merge into it
+    report_path = out / REPORT_FILENAME
+    report = load_report(report_path)
+
     logger.info("Processing %s ...", cdxj_file)
     batch = WriteBatch(raw_mode=True)
     last_key: bytes | None = None
@@ -165,6 +170,7 @@ def update_index(
                     packed = safe_pack(struct_format, warc_id, offset, length)
                     batch.put(compound_key, packed)
                     last_key = compound_key
+                    report.record(surt_url)
                     record_count += 1
 
                     if record_count % BATCH_SIZE == 0:
@@ -190,6 +196,9 @@ def update_index(
 
     # Write extent.json from the new catalog
     _write_extent(str(catalog_dest), out)
+
+    # Write the merged SURT host-pattern report
+    write_report(report_path, report)
 
 
 def main(argv: list[str] | None = None) -> None:

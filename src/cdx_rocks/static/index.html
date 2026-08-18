@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%9A%8A%3C/text%3E%3C/svg%3E">
+<title>cdx-rocks — Common Crawl News Index Gateway</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2d333b;
+    --text: #e6edf3;
+    --dim: #8b949e;
+    --accent: #58a6ff;
+    --accent-2: #3fb950;
+    --warn: #d29922;
+    --mono: "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px; line-height: 1.45;
+  }
+  header {
+    padding: 18px 24px 12px; border-bottom: 1px solid var(--border);
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 18px;
+    background: linear-gradient(180deg, #131a24, #0d1117);
+  }
+  header h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header h1 .tag {
+    font-size: 11px; font-weight: 600; color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 4px; padding: 1px 6px;
+    vertical-align: 2px; margin-left: 8px;
+  }
+  #status { color: var(--dim); font-size: 13px; font-family: var(--mono); }
+  #status .ok { color: var(--accent-2); }
+  #status .bad { color: #f85149; }
+  .apirow { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
+  .apirow input {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 8px; font-family: var(--mono); font-size: 12px; width: 240px;
+  }
+  .docslinks { display: flex; gap: 14px; padding: 8px 24px 0; }
+  .docslinks a {
+    color: var(--accent); text-decoration: none; font-size: 13px;
+    border: 1px solid rgba(88,166,255,.3); border-radius: 6px; padding: 4px 12px;
+    background: rgba(88,166,255,.06);
+  }
+  .docslinks a:hover { background: rgba(88,166,255,.15); text-decoration: underline; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 18px 24px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  section {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    display: flex; flex-direction: column; min-height: 420px;
+  }
+  .sec-head { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
+  .sec-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+  .sec-head h2 code {
+    font-family: var(--mono); font-size: 13px; color: var(--accent);
+    background: rgba(88,166,255,.08); border: 1px solid rgba(88,166,255,.25);
+    border-radius: 4px; padding: 1px 6px; margin-left: 6px;
+  }
+  .sec-head p { margin: 5px 0 0; font-size: 12.5px; color: var(--dim); }
+  .controls { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .controls label { font-size: 12px; color: var(--dim); }
+  select, input[type="text"].ctl {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 8px; font-family: var(--mono); font-size: 13px;
+  }
+  input[type="text"].ctl { width: 260px; }
+  button {
+    background: #21262d; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 12px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { background: #30363d; border-color: #444c56; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #1f6feb33; border-color: #1f6feb; color: var(--accent); }
+  button.primary:hover { background: #1f6feb55; }
+  .body { padding: 6px 0; flex: 1; overflow: auto; }
+  .breadcrumb { padding: 10px 16px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-family: var(--mono); font-size: 13px; }
+  .breadcrumb button {
+    background: none; border: none; color: var(--accent); padding: 2px 4px; font-size: 13px;
+    font-family: var(--mono); text-decoration: none;
+  }
+  .breadcrumb button:hover { text-decoration: underline; }
+  .breadcrumb button.here { color: var(--text); font-weight: 600; }
+  .breadcrumb .sep { color: var(--dim); }
+  .meta { padding: 6px 16px; font-size: 12px; color: var(--dim); font-family: var(--mono); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; padding: 7px 16px; color: var(--dim); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .6px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--panel);
+  }
+  td { padding: 6px 16px; border-bottom: 1px solid #21262d; vertical-align: top; }
+  tr.click { cursor: pointer; }
+  tr.click:hover td { background: #1c2530; }
+  td.surt, td.url { font-family: var(--mono); font-size: 12.5px; }
+  td.num { text-align: right; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+  td.ts { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; color: var(--dim); }
+  .countbar { height: 4px; border-radius: 2px; background: #21262d; margin-top: 3px; overflow: hidden; }
+  .countbar i { display: block; height: 100%; background: linear-gradient(90deg, #1f6feb, #58a6ff); }
+  .linkbtn {
+    background: none; border: none; color: var(--accent); font-size: 12px;
+    cursor: pointer; padding: 0 2px; text-decoration: none; font-family: inherit;
+  }
+  .linkbtn:hover { text-decoration: underline; }
+  .empty { padding: 40px 20px; text-align: center; color: var(--dim); font-size: 14px; }
+  .empty b { color: var(--text); }
+  .loading { padding: 40px 20px; text-align: center; color: var(--dim); font-size: 14px; }
+  .loading::after { content: ""; animation: dots 1.2s steps(4, end) infinite; display: inline-block; width: 1.2em; text-align: left; }
+  @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } 100% { content: ""; } }
+  .pager { padding: 10px 16px; display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--dim); font-family: var(--mono); }
+  .pager .grow { flex: 1; text-align: center; }
+  .err { padding: 20px 16px; color: #f85149; font-family: var(--mono); font-size: 13px; white-space: pre-wrap; }
+  details.raw { margin: 0 16px 12px; }
+  details.raw summary { cursor: pointer; color: var(--dim); font-size: 12px; padding: 4px 0; }
+  details.raw pre {
+    background: #0a0e14; border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px; font-size: 11.5px; overflow: auto; max-height: 300px; color: #9ecbff;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px; }
+  .chip {
+    font-family: var(--mono); font-size: 12px; color: var(--accent);
+    background: rgba(88,166,255,.07); border: 1px solid rgba(88,166,255,.25);
+    border-radius: 12px; padding: 2px 10px; cursor: pointer;
+  }
+  .chip:hover { background: rgba(88,166,255,.16); }
+  footer { padding: 10px 24px 24px; color: var(--dim); font-size: 12px; }
+  footer a { color: var(--accent); text-decoration: none; }
+  .kbd { font-family: var(--mono); font-size: 11px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>cdx-rocks <span class="tag">CC-NEWS index</span></h1>
+  <div id="status">connecting…</div>
+  <div class="apirow">
+    <label for="apibase">api</label>
+    <input id="apibase" type="text" spellcheck="false">
+  </div>
+</header>
+<div class="docslinks">
+  <a href="https://github.com/brian-learns/cdx_rocks"><code>cdx_rocks</code> on github</a>
+  <a href="/docs">Swagger Docs</a>
+  <a href="/redoc">ReDoc</a>
+  <a href="https://github.com/brian-learns/ccnget"><code>ccnget</code> python client</a>
+  <a href="https://huggingface.co/datasets/brian-learns/cdx-cc-news"><code>cdx-cc-news</code> HuggingFace Dataset</a>
+  <a href="https://data.commoncrawl.org/crawl-data/CC-NEWS/index.html">Common Crawl News on AWS Open Data</a>
+</div>
+
+<main>
+  <!-- ============ surt-browse ============ -->
+  <section id="sec-browse">
+    <div class="sec-head">
+      <h2>Tree browse <code>/cdx-index/surt-browse</code></h2>
+      <p>Walk the SURT host tree one level at a time. Click a row to drill in, or jump to its capture scan.</p>
+    </div>
+    <div class="breadcrumb" id="bc"></div>
+    <div class="controls">
+      <label>limit</label>
+      <select id="b-limit">
+        <option>10</option><option>25</option><option selected>50</option><option>100</option><option>200</option>
+      </select>
+      <button id="b-reload" title="Re-run query">↻ reload</button>
+      <span style="flex:1"></span>
+      <label><input type="checkbox" id="b-hosts-only" checked> hosts only (subdomains shown as children)</label>
+    </div>
+    <div class="body" id="b-body"><div class="loading">loading root</div></div>
+    <div class="pager" id="b-pager"></div>
+    <details class="raw"><summary>raw JSON</summary><pre id="b-raw"></pre></details>
+  </section>
+
+  <!-- ============ surt-prefix ============ -->
+  <section id="sec-prefix">
+    <div class="sec-head">
+      <h2>Prefix scan <code>/cdx-index/surt-prefix</code></h2>
+      <p>Wildcard capture search. A host pattern like <span class="kbd">com,reuters</span> matches that host + all subdomains; with
+      <span class="kbd">)</span> (e.g. <span class="kbd">com,reuters)/2025</span>) it becomes a path prefix. Top-N in key order —
+      <span class="kbd">total_results</span> is the number returned, not a true total.</p>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="controls">
+      <input class="ctl" id="p-prefix" type="text" placeholder="SURT prefix, e.g. com,reuters" spellcheck="false">
+      <button class="primary" id="p-go">scan</button>
+      <span style="flex:1"></span>
+      <label>limit</label>
+      <select id="p-limit">
+        <option>5</option><option>10</option><option selected>25</option><option>50</option><option>100</option>
+      </select>
+    </div>
+    <div class="body" id="p-body"><div class="empty">Pick a prefix and hit <b>scan</b>, or click <b>captures →</b> in the tree.</div></div>
+    <details class="raw"><summary>raw JSON</summary><pre id="p-raw"></pre></details>
+  </section>
+</main>
+
+<footer>
+  cdx-rocks · Common Crawl News index in RocksDB · endpoints:
+  <a id="f-browse" target="_blank" rel="noopener">/cdx-index/surt-browse</a> ·
+  <a id="f-prefix" target="_blank" rel="noopener">/cdx-index/surt-prefix</a> ·
+  <a id="f-openapi" target="_blank" rel="noopener">OpenAPI</a> ·
+  <a href="/terms" target="_blank" rel="noopener">Terms &amp; disclaimer</a>
+</footer>
+
+<script>
+"use strict";
+
+// ---------- API base (auto-detect + editable) ----------
+function defaultBase() {
+  if (location.protocol === "http:" || location.protocol === "https:") {
+    return location.origin;
+  }
+  return "http://localhost:7860";
+}
+const baseInput = document.getElementById("apibase");
+baseInput.value = localStorage.getItem("cdx-api-base") || defaultBase();
+baseInput.addEventListener("change", () => {
+  localStorage.setItem("cdx-api-base", baseInput.value.trim().replace(/\/+$/, ""));
+  boot();
+});
+const apiBase = () => baseInput.value.trim().replace(/\/+$/, "");
+
+async function api(path, params) {
+  const url = apiBase() + path + (params ? "?" + new URLSearchParams(params).toString() : "");
+  const t0 = performance.now();
+  const res = await fetch(url, { headers: { "Accept": "application/json" } });
+  const ms = Math.round(performance.now() - t0);
+  if (!res.ok) {
+    let detail = res.status + " " + res.statusText;
+    try { const j = await res.json(); detail += " — " + JSON.stringify(j.detail || j); } catch {}
+    throw new Error(detail);
+  }
+  const data = await res.json();
+  data._ms = ms;
+  data._url = url;
+  return data;
+}
+
+// ---------- formatting helpers ----------
+function fmtTs(ts) {
+  if (!/^\d{14}$/.test(ts)) return ts;
+  return ts.slice(0,4) + "-" + ts.slice(4,6) + "-" + ts.slice(6,8) + " " +
+         ts.slice(8,10) + ":" + ts.slice(10,12) + ":" + ts.slice(12,14);
+}
+function fmtBytes(n) {
+  if (n == null) return "";
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n/1024).toFixed(1) + " KB";
+  return (n/1048576).toFixed(2) + " MB";
+}
+function fmtNum(n) { return n == null ? "—" : n.toLocaleString("en-US"); }
+// surt key -> readable host + path.  com,google,news)/x/y  =>  news.google.com /x/y
+function surtToParts(surt) {
+  let hostPart = surt, path = "";
+  const i = surt.indexOf(")");
+  if (i >= 0) { hostPart = surt.slice(0, i); path = surt.slice(i + 1); }
+  const labels = hostPart.split(",");
+  const host = labels.reverse().join(".");
+  return { host, path, hostSurt: hostPart };
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// ---------- status bar ----------
+async function boot() {
+  const st = document.getElementById("status");
+  try {
+    const [extent, root] = await Promise.all([
+      api("/cdx-index/extent"),
+      api("/cdx-index/surt-browse", { pattern: "", limit: 1 }),
+    ]);
+    st.innerHTML =
+      '<span class="ok">● online</span> ' +
+      fmtNum(extent.file_extent) + " WARC files · " +
+      extent.file_oldest.slice(19, 26) + " → " + extent.file_newest.slice(19, 26) + " · " +
+      fmtNum(root.total_entries) + " captures";
+    document.getElementById("f-browse").href = apiBase() + "/cdx-index/surt-browse?pattern=com";
+    document.getElementById("f-prefix").href = apiBase() + "/cdx-index/surt-prefix?prefix=com%2Creuters&limit=10";
+    document.getElementById("f-openapi").href = apiBase() + "/openapi.json";
+    browseState.pattern = "";
+    loadBrowse();
+  } catch (e) {
+    st.innerHTML = '<span class="bad">● unreachable</span> ' + esc(e.message);
+  }
+}
+
+// ---------- surt-browse ----------
+const browseState = { pattern: "", limit: 50, offset: 0 };
+const bBody = document.getElementById("b-body");
+const bPager = document.getElementById("b-pager");
+const bRaw = document.getElementById("b-raw");
+const bc = document.getElementById("bc");
+
+function renderBreadcrumb(pattern) {
+  const labels = pattern ? pattern.split(",") : [];
+  let html = '<button data-p="">root</button>';
+  labels.forEach((_, i) => {
+    const p = labels.slice(0, i + 1).join(",");
+    html += '<span class="sep">/</span>';
+    const here = i === labels.length - 1;
+    html += '<button data-p="' + esc(p) + '"' + (here ? ' class="here"' : '') + '>' + esc(labels[i]) + '</button>';
+  });
+  bc.innerHTML = html;
+  bc.querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+    browseState.pattern = b.dataset.p;
+    browseState.offset = 0;
+    loadBrowse();
+  }));
+}
+
+async function loadBrowse() {
+  bBody.innerHTML = '<div class="loading">querying</div>';
+  bPager.innerHTML = "";
+  bRaw.textContent = "";
+  renderBreadcrumb(browseState.pattern);
+  try {
+    const r = await api("/cdx-index/surt-browse", {
+      pattern: browseState.pattern,
+      limit: browseState.limit,
+      offset: browseState.offset,
+    });
+    bRaw.textContent = JSON.stringify({ ...r, _ms: undefined, _url: undefined }, null, 2);
+
+    const keys = Object.keys(r.children);
+    if (!keys.length) {
+      bBody.innerHTML = '<div class="empty"><b>No children</b> at this level.<br>' +
+        'Try <button class="linkbtn" id="b-scan-self">scanning captures for this pattern →</button></div>';
+      const sb = document.getElementById("b-scan-self");
+      if (sb) sb.addEventListener("click", () => jumpToScan(browseState.pattern || null));
+    } else {
+      const max = Math.max(...keys.map(k => r.children[k]));
+      let html = '<table><thead><tr><th>surt pattern</th><th>host</th><th style="text-align:right">captures</th><th></th></tr></thead><tbody>';
+      for (const k of keys) {
+        const c = r.children[k];
+        const share = max ? Math.max(1, Math.round(c / max * 100)) : 0;
+        const parts = surtToParts(k + ")");
+        html += '<tr class="click" data-k="' + esc(k) + '">' +
+          '<td class="surt">' + esc(k) + '</td>' +
+          '<td class="url" title="' + esc(parts.host) + '">' + esc(parts.host) + '</td>' +
+          '<td class="num">' + fmtNum(c) +
+            '<div class="countbar" style="width:90px;margin:2px 0 0 auto"><i style="width:' + share + '%"></i></div>' +
+          '</td>' +
+          '<td><button class="linkbtn" data-scan="' + esc(k) + '" title="Scan captures under this prefix">captures →</button></td>' +
+          '</tr>';
+      }
+      html += '</tbody></table>';
+      bBody.innerHTML = html;
+      bBody.querySelectorAll("tr.click").forEach(tr => tr.addEventListener("click", (ev) => {
+        if (ev.target.closest("[data-scan]")) return;
+        browseState.pattern = tr.dataset.k;
+        browseState.offset = 0;
+        loadBrowse();
+      }));
+      bBody.querySelectorAll("[data-scan]").forEach(b => b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        jumpToScan(b.dataset.scan);
+      }));
+    }
+    // pager
+    const total = r.total_children;
+    const pages = Math.max(1, Math.ceil(total / r.limit));
+    const page = Math.floor(browseState.offset / r.limit) + 1;
+    const hasPrev = browseState.offset > 0;
+    const hasNext = r.next_offset != null;
+    bPager.innerHTML =
+      '<button id="b-first" ' + (hasPrev ? '' : 'disabled') + '>« first</button>' +
+      '<button id="b-prev" ' + (hasPrev ? '' : 'disabled') + '>‹ prev</button>' +
+      '<span class="grow">page ' + page + ' of ' + pages + ' · ' + fmtNum(total) + ' children</span>' +
+      '<button id="b-next" ' + (hasNext ? '' : 'disabled') + '>next ›</button>' +
+      '<button id="b-last" ' + (hasNext ? '' : 'disabled') + '>last »</button>';
+    const firstOff = 0;
+    const lastOff = Math.max(0, pages * r.limit - r.limit);
+    document.getElementById("b-first").onclick = () => { browseState.offset = firstOff; loadBrowse(); };
+    document.getElementById("b-prev").onclick = () => { browseState.offset = Math.max(0, browseState.offset - r.limit); loadBrowse(); };
+    document.getElementById("b-next").onclick = () => { browseState.offset = r.next_offset; loadBrowse(); };
+    document.getElementById("b-last").onclick = () => { browseState.offset = lastOff; loadBrowse(); };
+  } catch (e) {
+    bBody.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+  }
+}
+
+document.getElementById("b-limit").addEventListener("change", (e) => {
+  browseState.limit = +e.target.value;
+  browseState.offset = 0;
+  loadBrowse();
+});
+document.getElementById("b-reload").addEventListener("click", loadBrowse);
+
+// ---------- surt-prefix ----------
+const pBody = document.getElementById("p-body");
+const pRaw = document.getElementById("p-raw");
+const pPrefix = document.getElementById("p-prefix");
+
+/* const EXAMPLES = [
+  ["com,reuters", "host + subdomains"],
+  ["com,reuters)/world", "path prefix (wildcard)"],
+  ["com,google,news", "one host"],
+  ["de,tagesschau", "a German host"],
+];
+const chips = document.getElementById("chips");
+EXAMPLES.forEach(([p, title]) => {
+  const el = document.createElement("span");
+  el.className = "chip";
+  el.textContent = p;
+  el.title = title;
+  el.addEventListener("click", () => { pPrefix.value = p; loadPrefix(); });
+  chips.appendChild(el);
+}); */
+
+function jumpToScan(pattern) {
+  if (pattern != null) pPrefix.value = pattern;
+  document.getElementById("sec-prefix").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  loadPrefix();
+}
+
+async function loadPrefix() {
+  const prefix = pPrefix.value.trim();
+  if (!prefix) return;
+  pBody.innerHTML = '<div class="loading">scanning</div>';
+  pRaw.textContent = "";
+  try {
+    const r = await api("/cdx-index/surt-prefix", { prefix, limit: +document.getElementById("p-limit").value });
+    pRaw.textContent = JSON.stringify({ ...r, _ms: undefined, _url: undefined }, null, 2);
+    if (!r.results.length) {
+      pBody.innerHTML = '<div class="empty"><b>0 captures</b> returned for <span class="kbd">' + esc(prefix) + '</span><br>' +
+        'Hosts never indexed short-circuit to empty (no 404). Note: <span class="kbd">total_results</span> here is the count returned, not a true total.</div>';
+      return;
+    }
+    let html = '<table><thead><tr><th>url (from surt)</th><th>timestamp</th><th style="text-align:right">size</th></tr></thead><tbody>';
+    for (const row of r.results) {
+      const parts = surtToParts(row.surt_key);
+      const url = parts.host + (parts.path || "/");
+      html += '<tr>' +
+        '<td class="url" title="' + esc(row.surt_key) + '">' + esc(url) + '</td>' +
+        '<td class="ts">' + esc(fmtTs(row.timestamp)) + '</td>' +
+        '<td class="num">' + fmtBytes(row.length) + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    pBody.innerHTML = html;
+  } catch (e) {
+    pBody.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+  }
+}
+
+document.getElementById("p-go").addEventListener("click", loadPrefix);
+document.getElementById("p-limit").addEventListener("change", loadPrefix);
+pPrefix.addEventListener("keydown", (e) => { if (e.key === "Enter") loadPrefix(); });
+
+// ---------- go ----------
+boot();
+</script>
+</body>
+</html>

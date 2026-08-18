@@ -80,6 +80,7 @@ Writes to the output directory:
 - `cdx-rocks.json` — manifest (catalog, db path, struct format)
 - `all_warc_paths.txt.zst` — copied catalog
 - `extent.json` — static snapshot of file count and date range
+- `surt_report.json` — host label-prefix entry counts (feeds `/cdx-index/surt`)
 
 ### `cdx-rocks-update`
 
@@ -93,7 +94,8 @@ cdx-rocks-update /path/to/cc-news_2026_09.cdxj.zst \
 ```
 
 Replaces `all_warc_paths.txt.zst` in the output directory with the new catalog
-and refreshes `extent.json`.
+and refreshes `extent.json` and `surt_report.json` (new counts are merged
+into the existing report).
 
 ### `cdx-rocks-shadow`
 
@@ -116,8 +118,13 @@ set `CDX_ROCKS` to point to a [cdx-rocks database](https://github.com/brian-lear
 |----------|--------|-------------|
 | `/cdx-index/lookup` | GET | Query CDX index for URL captures |
 | `/cdx-index/extent` | GET | Show indexed WARC file count and date range |
+| `/cdx-index/surt-browse` | GET | Browse the SURT host tree one level at a time |
+| `/cdx-index/surt-prefix` | GET | Wildcard scan: captures under a SURT prefix |
 | `/health` | GET | Server health check |
+| `/` | GET | Interactive home page (SURT tree browse + prefix scan demo) |
+| `/terms` | GET | Data usage & disclaimer notice |
 | `/docs` | GET | Swagger/OpenAPI documentation |
+| `/redoc` | GET | ReDoc documentation |
 
 ### Lookup Parameters
 
@@ -127,6 +134,42 @@ set `CDX_ROCKS` to point to a [cdx-rocks database](https://github.com/brian-lear
 | `exact` | bool | `false` | Exact SURT match vs prefix match |
 | `at` | string | `null` | Timestamp to seek from (YYYYMMDDhhmmss) |
 | `limit` | int | 10 | Max results (1-100) |
+
+`url` is always parsed as a URL. For literal SURT keys (a host pattern
+copied from `/cdx-index/surt-browse`, or a path prefix) use
+`/cdx-index/surt-prefix` instead.
+
+### Surt Browse Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pattern` | string | `""` | SURT host pattern to expand (comma-joined labels, e.g. `com` or `com,example`); empty for the root |
+| `limit` | int | 50 | Max children returned (1-200); `total_children` reports the true count |
+| `offset` | int | `0` | Children to skip before `limit` is applied (0-based) |
+
+Each child key in the response is itself a valid `pattern`, so the tree can be
+walked level by level. Children are returned in rank order (count desc, name
+asc) and the order is stable for the life of a server run (the index is frozen
+until restart). To walk *all* children of a node, follow `next_offset`:
+request, then request again with `offset` set to `next_offset`, until it is
+`null`. Offsets past the end return `200` with an empty `children` — no 404.
+
+Counts come from `surt_report.json` (indexed entries,
+cumulative across build + updates, not unique URLs). Dotted-IP hosts (which
+count only their full host) appear as promoted entries at the root level.
+
+### Surt Prefix Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prefix` | string | (required) | SURT prefix to scan. A host pattern (no `)`) such as `com,aa` matches the host and all its subdomains — never sibling hosts like `com,aaa,ace`. A prefix containing `)` such as `com,aaa,ace)/activities` matches that path prefix (wildcard) |
+| `limit` | int | 10 | Max results (1-100) |
+
+Wildcard examples: `http://*.com/` → `prefix=com`;
+`https://ace.aaa.com/activities*` → `prefix=com,aaa,ace)/activities`.
+Results are in key order (SURT, then timestamp); `total_results` is the number
+returned, not a true total. Prefixes whose host was never indexed (not in
+`surt_report.json`) return an empty result (`total_results: 0`) — no 404.
 
 ## Tests
 

@@ -7,6 +7,7 @@ Exercises the full pipeline end-to-end:
 
 import io
 import json
+import pytest
 import sys
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from rocksdict import AccessType, Options, Rdict
 
 from cdx_rocks import build, index, server
 from cdx_rocks.build import build_index
+from cdx_rocks.report import SurtTree, load_report
 
 # Grab the original zstd.open saved by conftest
 _orig_zstd_open = sys.modules["tests.conftest"]._orig_zstd_open
@@ -40,13 +42,15 @@ def _make_cdxj(tmp_path: Path, catalog_path: Path) -> Path:
             text_writer = io.TextIOWrapper(writer, encoding="utf-8")
             for url, ts, filename, offset, length in records:
                 surt_str = surt.surt(url)
-                meta = json.dumps({
-                    "filename": filename,
-                    "offset": offset,
-                    "length": length,
-                    "offset_in_warc": offset,
-                    "warcproxycdxline": f"WARC/1.0 {url} {ts}",
-                })
+                meta = json.dumps(
+                    {
+                        "filename": filename,
+                        "offset": offset,
+                        "length": length,
+                        "offset_in_warc": offset,
+                        "warcproxycdxline": f"WARC/1.0 {url} {ts}",
+                    }
+                )
                 text_writer.write(f"{surt_str} {ts} {meta}\n")
             text_writer.flush()
 
@@ -93,6 +97,18 @@ def test_build_and_query_roundtrip(tmp_path: Path):
     assert (output_dir / "extent.json").is_file(), "Extent not written"
     assert (output_dir / "rocks").is_dir(), "RocksDB directory not created"
 
+    # SURT host-pattern report written with correct counts
+    report_path = output_dir / "surt_report.json"
+    assert report_path.is_file(), "surt_report.json not written"
+    report = json.loads(report_path.read_text())
+    assert report["total_entries"] == 3
+    assert report["patterns"] == {
+        "com": 2,
+        "com,example": 2,
+        "org": 1,
+        "org,other": 1,
+    }
+
     # Step 3: Open the real DB and catalog
     opts = Options(raw_mode=True)
     db = Rdict(str(output_dir / "rocks"), options=opts, access_type=AccessType.read_only())
@@ -104,9 +120,7 @@ def test_build_and_query_roundtrip(tmp_path: Path):
     server.app.state.catalog = id_to_path
 
     try:
-        surt_prefix, results = index.query_index(
-            server.app, "https://example.com/page1", exact_match=True
-        )
+        surt_prefix, results = index.query_index(server.app, "https://example.com/page1", exact_match=True)
         assert surt_prefix == "com,example)/page1"
         assert len(results) == 2
         assert results[0]["timestamp"] == "20260101120000"
@@ -118,9 +132,7 @@ def test_build_and_query_roundtrip(tmp_path: Path):
         assert results[1]["length"] == 800
 
         # Query the other domain
-        _surt, other_results = index.query_index(
-            server.app, "https://other.org/news", exact_match=True
-        )
+        _surt, other_results = index.query_index(server.app, "https://other.org/news", exact_match=True)
         assert len(other_results) == 1
         assert other_results[0]["timestamp"] == "20260201090000"
         assert other_results[0]["offset"] == 1400
@@ -194,13 +206,15 @@ def test_update_adds_records(tmp_path: Path):
     with open(cdxj_file2, "wb") as fout:
         with cctx.stream_writer(fout) as writer:
             text_writer = io.TextIOWrapper(writer, encoding="utf-8")
-            meta = json.dumps({
-                "filename": filenames[3],
-                "offset": 5000,
-                "length": 1200,
-                "offset_in_warc": 5000,
-                "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
-            })
+            meta = json.dumps(
+                {
+                    "filename": filenames[3],
+                    "offset": 5000,
+                    "length": 1200,
+                    "offset_in_warc": 5000,
+                    "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
+                }
+            )
             surt_str = surt.surt("https://newsite.com/article")
             text_writer.write(f"{surt_str} 20260301100000 {meta}\n")
             text_writer.flush()
@@ -225,15 +239,11 @@ def test_update_adds_records(tmp_path: Path):
 
     try:
         # Old records still queryable
-        _surt, results = index.query_index(
-            server.app, "https://example.com/page1", exact_match=True
-        )
+        _surt, results = index.query_index(server.app, "https://example.com/page1", exact_match=True)
         assert len(results) == 2
 
         # New record is present
-        _surt, new_results = index.query_index(
-            server.app, "https://newsite.com/article", exact_match=True
-        )
+        _surt, new_results = index.query_index(server.app, "https://newsite.com/article", exact_match=True)
         assert len(new_results) == 1
         assert new_results[0]["timestamp"] == "20260301100000"
         assert new_results[0]["offset"] == 5000
@@ -242,6 +252,101 @@ def test_update_adds_records(tmp_path: Path):
     finally:
         db.close()
         _clear_state()
+
+
+def test_update_merges_surt_report(tmp_path: Path):
+    """Verify the update loads the existing report and merges new counts."""
+    from cdx_rocks.update import update_index
+
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir1 = tmp_path / "cdxj1"
+    cdxj_dir1.mkdir(parents=True)
+
+    # Build initial index (com,example x2, org,other x1)
+    _make_cdxj(cdxj_dir1, test_catalog)
+    build_index(str(cdxj_dir1), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    report_path = output_dir / "surt_report.json"
+    report_before = json.loads(report_path.read_text())
+    assert report_before["total_entries"] == 3
+
+    # Second CDXJ with a different domain
+    name_to_id = build.load_catalog(str(test_catalog))
+    filenames = list(name_to_id.keys())
+    cdxj_file2 = tmp_path / "extra.cdxj.zst"
+    cctx = zstd.ZstdCompressor(level=1)
+    with open(cdxj_file2, "wb") as fout:
+        with cctx.stream_writer(fout) as writer:
+            text_writer = io.TextIOWrapper(writer, encoding="utf-8")
+            meta = json.dumps(
+                {
+                    "filename": filenames[3],
+                    "offset": 5000,
+                    "length": 1200,
+                    "offset_in_warc": 5000,
+                    "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
+                }
+            )
+            surt_str = surt.surt("https://newsite.com/article")
+            text_writer.write(f"{surt_str} 20260301100000 {meta}\n")
+            text_writer.flush()
+
+    update_index(str(cdxj_file2), str(test_catalog), str(output_dir))
+
+    # Merged report: old counts preserved, new domain added
+    report = json.loads(report_path.read_text())
+    assert report["total_entries"] == 4
+    assert report["patterns"] == {
+        "com": 3,
+        "com,example": 2,
+        "com,newsite": 1,
+        "org": 1,
+        "org,other": 1,
+    }
+
+
+def test_update_report_without_prior_report(tmp_path: Path):
+    """An update with no existing report file starts one fresh."""
+    from cdx_rocks.update import update_index
+
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir = tmp_path / "cdxj"
+    cdxj_dir.mkdir(parents=True)
+
+    _make_cdxj(cdxj_dir, test_catalog)
+    build_index(str(cdxj_dir), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    # Remove the report to simulate an index built before this feature existed
+    (output_dir / "surt_report.json").unlink()
+
+    # Update with a duplicate-free second file
+    name_to_id = build.load_catalog(str(test_catalog))
+    filenames = list(name_to_id.keys())
+    cdxj_file2 = tmp_path / "extra.cdxj.zst"
+    cctx = zstd.ZstdCompressor(level=1)
+    with open(cdxj_file2, "wb") as fout:
+        with cctx.stream_writer(fout) as writer:
+            text_writer = io.TextIOWrapper(writer, encoding="utf-8")
+            meta = json.dumps(
+                {
+                    "filename": filenames[3],
+                    "offset": 5000,
+                    "length": 1200,
+                    "offset_in_warc": 5000,
+                    "warcproxycdxline": "WARC/1.0 https://newsite.com/article 20260301100000",
+                }
+            )
+            surt_str = surt.surt("https://newsite.com/article")
+            text_writer.write(f"{surt_str} 20260301100000 {meta}\n")
+            text_writer.flush()
+
+    update_index(str(cdxj_file2), str(test_catalog), str(output_dir))
+
+    report = json.loads((output_dir / "surt_report.json").read_text())
+    assert report["total_entries"] == 1
+    assert report["patterns"] == {"com": 1, "com,newsite": 1}
 
 
 def test_lookup_endpoint_after_real_build(tmp_path: Path):
@@ -277,6 +382,203 @@ def test_lookup_endpoint_after_real_build(tmp_path: Path):
         assert body["total_results"] == 2
         assert body["results"][0]["offset"] == 100
         assert body["results"][1]["offset"] == 600
+    finally:
+        db.close()
+        _clear_state()
+
+
+def test_surt_endpoint_browses_host_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The /cdx-index/surt endpoint walks the report's host label tree."""
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir = tmp_path / "cdxj"
+    cdxj_dir.mkdir(parents=True)
+
+    _make_cdxj(cdxj_dir, test_catalog)
+    build_index(str(cdxj_dir), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    # Point the server's cached tree at this index's surt_report.json
+    counter = load_report(output_dir / "surt_report.json")
+    monkeypatch.setattr(server, "SURT_TREE", SurtTree(counter.total_entries, counter.patterns))
+
+    client = TestClient(server.app)
+
+    # Root level: top-level labels with counts
+    resp = client.get("/cdx-index/surt-browse")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pattern"] == ""
+    assert body["count"] == 0
+    assert body["total_entries"] == 3
+    assert body["total_children"] == 2
+    assert body["children"] == {"com": 2, "org": 1}
+
+    # One level down
+    resp = client.get("/cdx-index/surt-browse", params={"pattern": "com"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pattern"] == "com"
+    assert body["count"] == 2
+    assert body["children"] == {"com,example": 2}
+
+    # Leaf host: its own count, no children
+    resp = client.get("/cdx-index/surt-browse", params={"pattern": "com,example"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["count"] == 2
+    assert body["children"] == {}
+    assert body["total_children"] == 0
+
+    # Unknown pattern: valid response, empty
+    resp = client.get("/cdx-index/surt-browse", params={"pattern": "net"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["count"] == 0
+    assert body["children"] == {}
+
+    # Limit caps the children
+    resp = client.get("/cdx-index/surt-browse", params={"limit": 1})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["children"]) == 1
+    assert list(body["children"]) == ["com"]
+    assert body["total_children"] == 2
+
+    # Pagination: offset=0 is the first page, next_offset chains to the last
+    resp = client.get("/cdx-index/surt-browse", params={"limit": 1, "offset": 0})
+    body = resp.json()
+    assert body["children"] == {"com": 2}
+    assert body["offset"] == 0
+    assert body["limit"] == 1
+    assert body["next_offset"] == 1
+
+    resp = client.get("/cdx-index/surt-browse", params={"limit": 1, "offset": 1})
+    body = resp.json()
+    assert body["children"] == {"org": 1}
+    assert body["next_offset"] is None  # last page
+
+    # Offset past the end: 200 + empty (never 404)
+    resp = client.get("/cdx-index/surt-browse", params={"offset": 99})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["children"] == {}
+    assert body["next_offset"] is None
+    assert body["total_children"] == 2
+
+    # Negative offset is rejected
+    resp = client.get("/cdx-index/surt-browse", params={"offset": -1})
+    assert resp.status_code == 422
+
+
+def test_surt_endpoint_404_without_report(monkeypatch: pytest.MonkeyPatch):
+    """Indexes built before the report feature get a clear 404."""
+    monkeypatch.setattr(server, "SURT_TREE", None)
+    client = TestClient(server.app)
+    resp = client.get("/cdx-index/surt-browse")
+    assert resp.status_code == 404
+    assert "surt_report.json" in resp.json()["detail"]
+
+
+def test_surt_prefix_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """/cdx-index/surt-prefix wildcard-scans captures under a SURT prefix.
+
+    The fixture index (from _make_cdxj) has:
+      com,example)/page1   (2 captures: 20260101120000, 20260102130000)
+      org,other)/news      (1 capture)
+    so the host patterns present are com, com,example, org, org,other.
+    """
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir = tmp_path / "cdxj"
+    cdxj_dir.mkdir(parents=True)
+    _make_cdxj(cdxj_dir, test_catalog)
+    build_index(str(cdxj_dir), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    counter = load_report(output_dir / "surt_report.json")
+    monkeypatch.setattr(server, "SURT_REPORT_CACHE", counter)
+
+    opts = Options(raw_mode=True)
+    db = Rdict(str(output_dir / "rocks"), options=opts, access_type=AccessType.read_only())
+    server.app.state.db = db
+    server.app.state.catalog = _load_id_to_path(output_dir / "all_warc_paths.txt.zst")
+    try:
+        client = TestClient(server.app)
+
+        # Host pattern: the host's own captures (2 under com,example)
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "com,example"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["surt_prefix"] == "com,example"
+        assert all(r["surt_key"].startswith(("com,example)", "com,example,")) for r in body["results"])
+
+        # TLD pattern: everything under com
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "com", "limit": 10})
+        body = resp.json()
+        assert body["total_results"] == 2
+
+        # Path prefix: plain string prefix of com,example)/page1
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "com,example)/page1"})
+        assert resp.json()["total_results"] == 2
+
+        # Host never indexed: pre-check short-circuits to empty (no 404)
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "net,zzz"})
+        assert resp.status_code == 200
+        assert resp.json()["total_results"] == 0
+
+        # Limit caps results
+        resp = client.get("/cdx-index/surt-prefix", params={"prefix": "com", "limit": 1})
+        body = resp.json()
+        assert body["total_results"] == 1
+        assert len(body["results"]) == 1
+    finally:
+        db.close()
+        _clear_state()
+
+
+def test_lookup_is_url_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """/lookup parses url as a URL only — the SURT-key mode is gone."""
+    test_catalog = Path(__file__).parent / "test_warc_paths.txt.zst"
+    output_dir = tmp_path / "output"
+    cdxj_dir = tmp_path / "cdxj"
+    cdxj_dir.mkdir(parents=True)
+
+    _make_cdxj(cdxj_dir, test_catalog)
+    build_index(str(cdxj_dir), str(test_catalog), str(output_dir), struct_format="!HQI")
+
+    opts = Options(raw_mode=True)
+    db = Rdict(str(output_dir / "rocks"), options=opts, access_type=AccessType.read_only())
+    id_to_path = _load_id_to_path(output_dir / "all_warc_paths.txt.zst")
+    server.app.state.db = db
+    server.app.state.catalog = id_to_path
+
+    # SURT_REPORT_CACHE is irrelevant to /lookup now; clear it to prove it.
+    monkeypatch.setattr(server, "SURT_REPORT_CACHE", None)
+
+    try:
+        client = TestClient(server.app)
+
+        # A SURT-looking string is parsed as a URL, not used as a literal key.
+        # surt.surt("com,example") -> "com,example)/" (root path).
+        resp = client.get("/cdx-index/lookup", params={"url": "com,example", "exact": False, "limit": 10})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["query_url"] == "com,example"
+        assert body["surt_prefix"] == "com,example)/"
+
+        # A legacy key=surt param is silently ignored (unknown query param).
+        resp = client.get("/cdx-index/lookup", params={"url": "com,example", "key": "surt"})
+        assert resp.status_code == 200
+        assert resp.json()["surt_prefix"] == "com,example)/"
+
+        # A real URL still behaves exactly as before
+        resp = client.get(
+            "/cdx-index/lookup",
+            params={"url": "https://example.com/page1", "exact": True},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["surt_prefix"] == "com,example)/page1"
+        assert body["total_results"] == 2
     finally:
         db.close()
         _clear_state()

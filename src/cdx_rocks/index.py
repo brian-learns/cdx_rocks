@@ -18,6 +18,13 @@ _VALUE_FORMAT = resolve_struct_format()
 VALUE_FORMAT: str = _VALUE_FORMAT
 VALUE_SIZE: int = struct.calcsize(VALUE_FORMAT)
 
+# Hard cap on the number of keys a single request may examine. The
+# proximity path (at + exact_match=False) must walk the whole prefix range
+# to find the closest timestamp; without a cap, a caller choosing a short
+# prefix (e.g. a bare TLD via key=surt) could make the server walk millions
+# of keys per request.
+MAX_SCAN_KEYS = 10_000
+
 
 def query_index(
     app: FastAPI,
@@ -25,11 +32,16 @@ def query_index(
     exact_match: bool = False,
     limit: int = 10,
     at: str | None = None,
+    surt_key: str | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Core lookup engine:
 
     - exact_match=True + at: Seeks directly in RocksDB to the first record >= 'at' timestamp.
-    - exact_match=False + at: Scans prefix entries and returns closest matches sorted by proximity to 'at'.
+    - exact_match=False + at: Scans prefix entries and returns closest matches sorted by proximity to 'at'
+      (among the keys within the scan cap — see MAX_SCAN_KEYS).
+    - surt_key: If given, used verbatim as the SURT prefix (no URL parsing), so
+      callers can query with a literal SURT key such as ``com,yahoo,news``.
+    - Availability: at most MAX_SCAN_KEYS keys are examined per request.
     """
     from contextlib import suppress
 
@@ -39,7 +51,10 @@ def query_index(
 
     catalog: dict[int, str] = getattr(app.state, "catalog", {})
 
-    surt_str = surt.surt(url)
+    if surt_key is not None:
+        surt_str: str = surt_key
+    else:
+        surt_str = str(surt.surt(url))
 
     # Determine prefix and database seeking key
     if exact_match:
@@ -54,6 +69,7 @@ def query_index(
         from_key = prefix_bytes
 
     results: list[dict[str, str | int]] = []
+    scanned = 0
 
     for key, value in db.items(from_key=from_key):
         if not isinstance(key, bytes):
@@ -62,6 +78,7 @@ def query_index(
         if not key.startswith(prefix_bytes):
             break
 
+        scanned += 1
         decoded_key = key.decode("utf-8", errors="replace")
         if "\x00" in decoded_key:
             surt_key, timestamp = decoded_key.rsplit("\x00", 1)
@@ -85,7 +102,12 @@ def query_index(
         if (exact_match or at is None) and len(results) >= limit:
             break
 
-    # For partial prefix match with 'at', calculate distance and sort by closest timestamp
+        # Availability cap: never examine more than MAX_SCAN_KEYS keys
+        if scanned >= MAX_SCAN_KEYS:
+            break
+
+    # For partial prefix match with 'at', calculate distance and sort by closest
+    # timestamp (within the scanned range, which is capped at MAX_SCAN_KEYS keys)
     if not exact_match and at and results:
         target_ts = at.ljust(14, "0") if len(at) < 14 else at[:14]
 
