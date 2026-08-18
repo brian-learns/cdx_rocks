@@ -5,7 +5,6 @@ import logging
 import os
 import tempfile
 from contextlib import asynccontextmanager
-from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, cast, override
 
@@ -74,7 +73,7 @@ SURT_TREE: SurtTree | None = (
 )
 
 API_VERSION = "0.6.0"
-DESCRIPTION = f"""
+DESCRIPTION = """
 URL lookup tool for [Common Crawl News Dataset](https://data.commoncrawl.org/crawl-data/CC-NEWS/index.html) indexed in RocksDB with a simple API.
 """
 
