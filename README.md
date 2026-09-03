@@ -32,16 +32,25 @@ uvx hf sync hf://buckets/brian-learns/cdx-rocks-demo rocksdb_index
 
 ## Run the server
 
+There is a `docker-compose.yml` but it also works with podman and apple containers
+
 ```bash
-docker compose up
-# or on macOS
+# podman (linux or MacOS)
+uvx podman-compose up
+
+# Apple Containers on macOS
 container-compose up
+
+
 # change the port
-CDX_PORT=8000 docker compose up
+CDX_PORT=8000 container-compose up
+
 # rebuild
-docker compose up --build
+uvx podman-compose up --build
+
 # get on the running instance
-docker compose exec web /bin/sh
+podman-compose exec web /bin/sh
+container exec -it cdx-rocks-app /bin/sh
 ```
 
 ## CLI Commands
