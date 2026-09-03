@@ -9,7 +9,6 @@ services:
     ports:
       - "${CDX_PORT:-7860}:7860"
     volumes:
-      - ./all_warc_paths.txt.zst:/app/all_warc_paths.txt.zst
       - ./rocksdb_index:/app/data:ro
     environment:
       - ENV=production
